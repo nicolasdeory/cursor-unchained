@@ -21,3 +21,6 @@ Thumbs.db
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Local Cursor/Zed edit prediction eval cassettes may contain source code.
+captures/

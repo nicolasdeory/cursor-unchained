@@ -35,6 +35,53 @@ Example Tab Completion API Response
 
 **RefreshTabContext**: a context refresh service that is used to refresh the tab context which I believe is used to provide StreamCpp with more context for the tab completion request via codeblocks.
 
+## Zed Cursor Tab Proxy
+
+This fork also includes an experimental Zed bridge:
+
+- Zed patch: https://github.com/nicolasdeory/zed/tree/cursor-tab-external-provider
+- Proxy branch: https://github.com/nicolasdeory/cursor-unchained/tree/zed-cursor-tab-proxy
+
+The Zed patch adds an `external` edit-prediction provider. The proxy exposes a local Zed-shaped endpoint and forwards prediction requests to Cursor Tab using the Cursor request format.
+
+### Run The Proxy
+
+```bash
+bun install
+bun run zed-proxy
+```
+
+The proxy listens on:
+
+```text
+http://127.0.0.1:17878/predict
+```
+
+Health check:
+
+```bash
+curl http://127.0.0.1:17878/health
+```
+
+### Zed Settings
+
+Use the patched Zed branch and configure edit predictions like this:
+
+```jsonc
+{
+  "edit_predictions": {
+    "provider": "external",
+    "external": {
+      "api_url": "http://127.0.0.1:17878/predict"
+    }
+  }
+}
+```
+
+### Notes
+
+This is not a full Cursor editor clone. It maps Zed edit-prediction context into Cursor Tab requests, normalizes Cursor's response back into Zed edits, and supports multi-file context when Zed provides it. Cursor account credentials are read from a local `.env`; do not commit that file.
+
 ## Setup
 
 1. Follow the below steps to get the environment variables for the StreamCpp/Tab Completion functionality
