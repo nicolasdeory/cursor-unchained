@@ -14,6 +14,8 @@ export type ZedRequestForEdit = {
   workspace_root?: string;
   contents: string;
   cursor: ZedPosition;
+  cursor_request?: unknown;
+  cursorRequest?: unknown;
 };
 
 export type CursorResultForEdit = {
@@ -406,6 +408,134 @@ function duplicateDeclarationPenalty(oldContents: string, newContents: string): 
   return penalty;
 }
 
+function requestCursorPayload(request: ZedRequestForEdit): any {
+  return request.cursorRequest ?? request.cursor_request;
+}
+
+function diffHistoryEntriesFromRequest(request: ZedRequestForEdit): string[] {
+  const payload = requestCursorPayload(request);
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const entries: string[] = [];
+  const diffHistory = (payload as any).diffHistory;
+  if (Array.isArray(diffHistory)) {
+    entries.push(...diffHistory.map(String));
+  }
+
+  const currentPath =
+    (payload as any).currentFile?.relativeWorkspacePath ??
+    request.path ??
+    request.absolute_path;
+  const fileDiffHistories = (payload as any).fileDiffHistories;
+  if (Array.isArray(fileDiffHistories)) {
+    for (const history of fileDiffHistories) {
+      if (
+        currentPath &&
+        history?.fileName &&
+        String(history.fileName) !== String(currentPath)
+      ) {
+        continue;
+      }
+      if (Array.isArray(history?.diffHistory)) {
+        entries.push(...history.diffHistory.map(String));
+      }
+    }
+  }
+
+  return entries;
+}
+
+function normalizeIntentLine(line: string): string | null {
+  const trimmed = line.trim();
+  if (trimmed.length < 6 || !/[A-Za-z0-9_$]/.test(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
+function deletedBlocksFromRequest(request: ZedRequestForEdit): string[][] {
+  const blocks: string[][] = [];
+
+  for (const entry of diffHistoryEntriesFromRequest(request)) {
+    let current: string[] = [];
+    const flush = () => {
+      const hasDeclaration = current.some((line) =>
+        /^(?:export\s+)?(?:const|let|var|function|class|interface|type)\s+/.test(line),
+      );
+      const totalLength = current.join("\n").length;
+      if (current.length > 0 && (hasDeclaration || current.length >= 2) && totalLength >= 24) {
+        blocks.push(current);
+      }
+      current = [];
+    };
+
+    for (const rawLine of entry.split("\n")) {
+      let deletedLine: string | null = null;
+      const cursorDiffMatch = rawLine.match(/^\d+-\|(.*)$/);
+      if (cursorDiffMatch) {
+        deletedLine = cursorDiffMatch[1];
+      } else if (rawLine.startsWith("-") && !rawLine.startsWith("--- ")) {
+        deletedLine = rawLine.slice(1);
+      } else if (rawLine.startsWith("+") || /^\d+\+\|/.test(rawLine)) {
+        flush();
+        continue;
+      }
+
+      if (deletedLine == null) {
+        continue;
+      }
+
+      const normalized = normalizeIntentLine(deletedLine);
+      if (normalized) {
+        current.push(normalized);
+      }
+    }
+    flush();
+  }
+
+  return blocks;
+}
+
+function containsTrimmedLineSequence(contents: string, block: string[]): boolean {
+  if (block.length === 0) {
+    return false;
+  }
+
+  const lines = contents.split("\n").map((line) => line.trim());
+  for (let start = 0; start <= lines.length - block.length; start++) {
+    let matched = true;
+    for (let offset = 0; offset < block.length; offset++) {
+      if (lines[start + offset] !== block[offset]) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function deletedBlockReintroductionPenalty(
+  request: ZedRequestForEdit,
+  newContents: string,
+): number {
+  let penalty = 0;
+  for (const block of deletedBlocksFromRequest(request)) {
+    if (
+      !containsTrimmedLineSequence(request.contents, block) &&
+      containsTrimmedLineSequence(newContents, block)
+    ) {
+      penalty += 900 + block.join("\n").length * 2;
+    }
+  }
+  return penalty;
+}
+
 function adjacentDuplicatePenalty(text: string): number {
   const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
   let penalty = 0;
@@ -505,6 +635,7 @@ function scoreCandidate(
     editLineDistance * 12 -
     windowOverlapScore(oldWindow, candidateText) * 8 +
     duplicateDeclarationPenalty(request.contents, candidate.newContents) +
+    deletedBlockReintroductionPenalty(request, candidate.newContents) +
     adjacentDuplicatePenalty(candidateText);
 
   for (const name of oldTextDeclarations) {
@@ -690,6 +821,10 @@ export function normalizeCursorEdits(
 ): NormalizedEdit[] {
   const { directEdit, candidates } = cursorEditCandidates(request, result);
   if (directEdit) {
+    const newContents = applyNormalizedEdits(request.contents, [directEdit]);
+    if (deletedBlockReintroductionPenalty(request, newContents) > 0) {
+      return [];
+    }
     if (directEdit.reason === "document-like") {
       const lineEdits = lineDiffEdits(request.contents, result.text, "document-like-line-diff");
       if (

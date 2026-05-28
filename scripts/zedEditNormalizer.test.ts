@@ -84,6 +84,42 @@ describe("normalizeCursorEdit", () => {
     ).toBeNull();
   });
 
+  test("drops predictions that reintroduce recently deleted declarations", () => {
+    const contents = [
+      "    const remainingItemIds = new Set(items.map((item) => item.id));",
+      "",
+      "    return remainingItemIds;",
+      "",
+    ].join("\n");
+    const requestWithDeletion: ZedRequestForEdit = {
+      ...request(contents, 1, 4),
+      cursor_request: {
+        currentFile: { relativeWorkspacePath: "test.ts" },
+        diffHistory: [
+          [
+            "@@ -1,6 +1,3 @@",
+            " const remainingItemIds = new Set(items.map((item) => item.id));",
+            "-const removedItemIds = new Set(items.map((item) => item.previousId));",
+            "-const removedItemCount = removedItemIds.size;",
+            "-",
+            " return remainingItemIds;",
+          ].join("\n"),
+        ],
+        fileDiffHistories: [],
+      },
+    };
+
+    expect(
+      normalizeCursorEdit(requestWithDeletion, {
+        text: [
+          "    const removedItemIds = new Set(items.map((item) => item.previousId));",
+          "    const removedItemCount = removedItemIds.size;",
+        ].join("\n"),
+        rangeToReplace: null,
+      }),
+    ).toBeNull();
+  });
+
   test("collapses repeated lines inside Cursor output", () => {
     const contents = ["    ", "", "    for (const item of items) {}", ""].join("\n");
     const edit = normalizeCursorEdit(request(contents, 0, 4), {

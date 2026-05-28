@@ -42,7 +42,13 @@ function declarationCount(contents: string, name: string) {
     ).length;
 }
 
-function exactPayload(contents: string, cursor: Position, relPath: string, workspaceRoot: string) {
+function exactPayload(
+  contents: string,
+  cursor: Position,
+  relPath: string,
+  workspaceRoot: string,
+  extra: Record<string, unknown> = {},
+) {
   const lineEnding = contents.includes("\r\n") ? "\r\n" : "\n";
   return {
     currentFile: {
@@ -83,10 +89,17 @@ function exactPayload(contents: string, cursor: Position, relPath: string, works
     supportsCpt: false,
     supportsCrlfCpt: false,
     codeResults: [],
+    ...extra,
   };
 }
 
-async function runCase(name: string, contents: string, cursor: Position, absolutePath = "/tmp/test.ts") {
+async function runCase(
+  name: string,
+  contents: string,
+  cursor: Position,
+  absolutePath = "/tmp/test.ts",
+  extraCursorPayload: Record<string, unknown> = {},
+) {
   const workspaceRoot = path.dirname(absolutePath);
   const relPath = path.basename(absolutePath);
   const body = {
@@ -97,7 +110,7 @@ async function runCase(name: string, contents: string, cursor: Position, absolut
     language: "TypeScript",
     contents,
     cursor,
-    cursor_request: exactPayload(contents, cursor, relPath, workspaceRoot),
+    cursor_request: exactPayload(contents, cursor, relPath, workspaceRoot, extraCursorPayload),
   };
 
   const started = performance.now();
@@ -121,6 +134,8 @@ async function runCase(name: string, contents: string, cursor: Position, absolut
     changed: next !== contents,
     selectedItemIds: declarationCount(next, "selectedItemIds"),
     pendingUpdates: declarationCount(next, "pendingUpdates"),
+    removedItemIds: declarationCount(next, "removedItemIds"),
+    removedItemCount: declarationCount(next, "removedItemCount"),
     firstEditRange: edits[0]?.range ?? null,
     firstEditTextLength: edits[0]?.text.length ?? 0,
     firstEditPreview: edits[0]?.text.slice(0, 160) ?? "",
@@ -157,10 +172,42 @@ const duplicateSensitive = [
   "",
 ].join("\n");
 
+const deletionSensitive = [
+  "    const remainingItemIds = new Set(items.map((item) => item.id));",
+  "",
+  "    return remainingItemIds;",
+  "",
+].join("\n");
+
+const deletionDiff = [
+  "@@ -1,6 +1,3 @@",
+  " const remainingItemIds = new Set(items.map((item) => item.id));",
+  "-const removedItemIds = new Set(items.map((item) => item.previousId));",
+  "-const removedItemCount = removedItemIds.size;",
+  "-",
+  " return remainingItemIds;",
+].join("\n");
+
 const results = [
   await runCase("simple-return", simple, { line: 1, column: 9 }),
   await runCase("duplicate-sensitive-collection", duplicateSensitive, { line: 4, column: 18 }),
   await runCase("duplicate-sensitive-selection", duplicateSensitive, { line: 15, column: 0 }),
+  await runCase(
+    "deletion-sensitive",
+    deletionSensitive,
+    { line: 1, column: 4 },
+    "/tmp/test.ts",
+    {
+      diffHistory: [deletionDiff],
+      fileDiffHistories: [
+        {
+          fileName: "test.ts",
+          diffHistory: [deletionDiff],
+          diffHistoryTimestamps: [Date.now()],
+        },
+      ],
+    },
+  ),
 ];
 
 const maxLatencyMs = Number(process.env.ZED_CURSOR_PROXY_MAX_LATENCY_MS ?? "2500");
@@ -177,6 +224,14 @@ if (duplicateCollection && duplicateCollection.selectedItemIds > 1) {
 }
 if (duplicateCollection && duplicateCollection.pendingUpdates > 1) {
   failures.push("duplicate-sensitive-selection duplicated pendingUpdates");
+}
+
+const deletionCollection = results.find((result) => result.name === "deletion-sensitive");
+if (deletionCollection && deletionCollection.removedItemIds > 0) {
+  failures.push("deletion-sensitive reintroduced removedItemIds");
+}
+if (deletionCollection && deletionCollection.removedItemCount > 0) {
+  failures.push("deletion-sensitive reintroduced removedItemCount");
 }
 
 console.log(
