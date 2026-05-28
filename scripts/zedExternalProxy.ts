@@ -4,8 +4,8 @@ import path from "node:path";
 import fs from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { defaultStreamCppPayload } from "../src/lib/constants";
-import { normalizeCursorEdits } from "./zedEditNormalizer";
 import { normalizeFileDiffHistories } from "./cursorPayloadUtils";
+import { toZedResponse } from "./zedExternalProtocol";
 import {
   CURSOR_BEARER_TOKEN,
   X_CURSOR_CLIENT_VERSION,
@@ -835,78 +835,6 @@ async function streamCpp(request: ZedRequest): Promise<CursorResult> {
   return exactResult;
 }
 
-function toZedResponse(request: ZedRequest, result: CursorResult) {
-  const id = result.bindingId || crypto.randomUUID();
-  const edits = [];
-
-  if (DEBUG) {
-    console.error(
-      JSON.stringify({
-        path: relativePath(request),
-        cursor: request.cursor,
-        hasExactCursorPayload: Boolean(
-          request.cursorRequest ?? request.cursor_request,
-        ),
-        source: result.source,
-        status: result.status,
-        bindingId: result.bindingId ? "present" : "missing",
-        textLength: result.text.length,
-        rangeToReplace: result.rangeToReplace,
-        cursorPredictionTarget: result.cursorPredictionTarget,
-        textPreview: result.text.slice(0, 220),
-      }),
-    );
-  }
-
-  if (result.text) {
-    const normalizedEdits = normalizeCursorEdits(request, result);
-    if (normalizedEdits.length > 0) {
-      if (DEBUG) {
-        console.error(
-          JSON.stringify({
-            applied: "edits",
-            path: relativePath(request),
-            cursor: request.cursor,
-            editCount: normalizedEdits.length,
-            ranges: normalizedEdits.map((edit) => edit.range),
-            reasons: normalizedEdits.map((edit) => edit.reason),
-            textPreview: normalizedEdits.map((edit) => edit.text).join("\n---\n").slice(0, 220),
-          }),
-        );
-      }
-      edits.push(
-        ...normalizedEdits.map((edit) => ({
-          range: edit.range,
-          text: edit.text,
-        })),
-      );
-    } else if (DEBUG) {
-      console.error(
-        JSON.stringify({
-          applied: "none",
-          path: relativePath(request),
-          cursor: request.cursor,
-        }),
-      );
-    }
-  }
-
-  const response: Record<string, unknown> = { id, edits };
-  if (result.cursorPredictionTarget?.relativePath) {
-    response.jump = {
-      path: result.cursorPredictionTarget.relativePath,
-      expected_content: result.cursorPredictionTarget.expectedContent,
-      should_retrigger: result.cursorPredictionTarget.shouldRetriggerCpp,
-      position: {
-        line: Math.max(0, result.cursorPredictionTarget.lineNumberOneIndexed - 1),
-        column: 0,
-      },
-    };
-  }
-
-  return response;
-}
-
 Bun.serve({
   hostname: "127.0.0.1",
   port: PORT,
@@ -939,7 +867,10 @@ Bun.serve({
       const zedRequest = (await req.json()) as ZedRequest;
       const startedAt = performance.now();
       const cursorResult = await streamCpp(zedRequest);
-      const zedResponse = toZedResponse(zedRequest, cursorResult);
+      const zedResponse = toZedResponse(zedRequest, cursorResult, {
+        debug: DEBUG,
+        debugPath: relativePath(zedRequest),
+      });
       const latencyMs = Math.round(performance.now() - startedAt);
       appendCapture({
         schema: 1,
