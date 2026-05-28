@@ -13,6 +13,7 @@
 		"test:zed-proxy": "bun test scripts/zedEditNormalizer.test.ts",
 		"probe:zed-proxy": "bun run scripts/probeZedProxy.ts",
 		"eval:zed-proxy": "bun run scripts/evalZedProxyCaptures.ts",
+		"install:zed-macos": "bash scripts/macos/install-zed-cursor-tab.sh",
 		"zed-proxy": "bun run scripts/zedExternalProxy.ts",
 		"streamCpp": "bun run scripts/streamCpp.ts",
 		"refreshTabContext": "bun run scripts/refreshTabContext.ts"

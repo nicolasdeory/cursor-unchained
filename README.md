@@ -78,6 +78,35 @@ Use the patched Zed branch and configure edit predictions like this:
 }
 ```
 
+### Install A macOS Zed Preview App
+
+Clone the patched Zed fork next to this repo, then run the installer:
+
+```bash
+git clone https://github.com/nicolasdeory/zed ../zed
+git -C ../zed switch cursor-tab-external-provider
+bun run install:zed-macos
+```
+
+The installer builds the patched Zed release binary, copies the existing Zed Preview app bundle so the normal icon and metadata are preserved, installs it as:
+
+```text
+/Applications/Zed Preview Cursor Tab.app
+```
+
+The app wrapper starts the local proxy on launch if it is not already running, then launches the patched Zed binary. To use a different Zed checkout or app path:
+
+```bash
+bun run install:zed-macos -- --zed-repo /path/to/zed --app "/Applications/Zed Cursor Tab.app"
+```
+
+If Xcode reports a missing Metal Toolchain during incremental release builds, run:
+
+```bash
+xcodebuild -downloadComponent MetalToolchain
+xcrun -k
+```
+
 ### Notes
 
 This is not a full Cursor editor clone. It maps Zed edit-prediction context into Cursor Tab requests, normalizes Cursor's response back into Zed edits, and supports multi-file context when Zed provides it. Cursor account credentials are read from a local `.env`; do not commit that file.
