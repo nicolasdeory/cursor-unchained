@@ -9,6 +9,8 @@ BACKUP="${BACKUP:-/Applications/Zed Preview Stock.app}"
 PORT="${ZED_CURSOR_PROXY_PORT:-17878}"
 SETTINGS_PATH="${ZED_SETTINGS_PATH:-${HOME}/.config/zed/settings.json}"
 CONFIGURE_SETTINGS=1
+MIN_FREE_GB="${ZED_CURSOR_MIN_FREE_GB:-25}"
+CLEAN_BUILD_CACHE=0
 
 usage() {
   cat <<'EOF'
@@ -22,10 +24,13 @@ Options:
   --settings-path PATH  Zed settings file to update. Default: ~/.config/zed/settings.json
   --no-settings         Do not update Zed settings.
   --no-build            Skip cargo build and install already-built release binaries.
+  --clean-build-cache   Remove regenerable Zed debug/incremental build artifacts before building.
+  --min-free-gb GB      Minimum free disk space required before building. Default: 25.
   -h, --help            Show this help.
 
 Environment:
-  ZED_REPO, SOURCE_APP, APP, BACKUP, ZED_SETTINGS_PATH, ZED_CURSOR_PROXY_PORT, CARGO_INCREMENTAL
+  ZED_REPO, SOURCE_APP, APP, BACKUP, ZED_SETTINGS_PATH, ZED_CURSOR_PROXY_PORT,
+  ZED_CURSOR_MIN_FREE_GB, CARGO_INCREMENTAL
 EOF
 }
 
@@ -59,6 +64,14 @@ while [[ $# -gt 0 ]]; do
     --no-build)
       BUILD=0
       shift
+      ;;
+    --clean-build-cache)
+      CLEAN_BUILD_CACHE=1
+      shift
+      ;;
+    --min-free-gb)
+      MIN_FREE_GB="$2"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -173,7 +186,41 @@ fs.writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
   echo "Configured Zed edit predictions to use ${predict_url}"
 }
 
+free_disk_gb() {
+  local path free_kb
+  path="$1"
+  free_kb="$(df -Pk "${path}" | awk 'NR == 2 { print $4 }')"
+  echo $((free_kb / 1024 / 1024))
+}
+
+preflight_build_disk() {
+  local free_gb
+
+  if [[ "${CLEAN_BUILD_CACHE}" == "1" ]]; then
+    echo "Removing regenerable Zed debug and incremental build artifacts."
+    rm -rf "${ZED_REPO}/target/debug" "${ZED_REPO}/target/release/incremental"
+  fi
+
+  free_gb="$(free_disk_gb "${ZED_REPO}")"
+  if (( free_gb < MIN_FREE_GB )); then
+    cat >&2 <<EOF
+Only ${free_gb}G free near ${ZED_REPO}; release builds need about ${MIN_FREE_GB}G.
+
+Try:
+  bun run install:zed-macos -- --clean-build-cache
+
+Or when updating:
+  bun run update:zed-macos -- --install-arg --clean-build-cache
+
+You can lower the threshold with --min-free-gb if you know the build will fit.
+EOF
+    exit 1
+  fi
+}
+
 if [[ "${BUILD}" == "1" ]]; then
+  preflight_build_disk
+
   INCREMENTAL="${CARGO_INCREMENTAL:-1}"
   if [[ "${INCREMENTAL}" != "0" ]] && ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then
     echo "Metal Toolchain was not resolved by xcrun; clearing xcrun cache and retrying."

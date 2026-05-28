@@ -112,6 +112,12 @@ To check for upstream Zed changes, rebase the patched branch, and reinstall when
 bun run update:zed-macos
 ```
 
+If a large upstream rebuild is low on disk, retry with regenerable build artifacts cleared:
+
+```bash
+bun run update:zed-macos -- --install-arg --clean-build-cache
+```
+
 The updater refuses to run when the Zed checkout has local changes or is detached. To preview the update without changing anything:
 
 ```bash
