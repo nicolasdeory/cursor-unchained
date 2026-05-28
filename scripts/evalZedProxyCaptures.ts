@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { normalizeCursorEdit, type ZedRequestForEdit } from "./zedEditNormalizer";
+import { normalizeCursorEdits, type ZedRequestForEdit } from "./zedEditNormalizer";
 
 type Position = { line: number; column: number };
 type Edit = { range: { start: Position; end: Position }; text: string };
@@ -64,6 +64,16 @@ function applyEdit(contents: string, edit: Edit) {
   return contents.slice(0, start) + edit.text + contents.slice(end);
 }
 
+function applyEdits(contents: string, edits: Edit[]) {
+  return [...edits]
+    .sort(
+      (left, right) =>
+        offsetForPosition(contents, right.range.start) -
+        offsetForPosition(contents, left.range.start),
+    )
+    .reduce((next, edit) => applyEdit(next, edit), contents);
+}
+
 function declarationCounts(contents: string): Map<string, number> {
   const counts = new Map<string, number>();
   for (const line of contents.split("\n")) {
@@ -113,6 +123,7 @@ for (const input of captureInputs()) {
 let rawNonEmpty = 0;
 let normalizedShown = 0;
 let changed = 0;
+let multiEdit = 0;
 let duplicateRisk = 0;
 let punctuationOnly = 0;
 let replayMismatch = 0;
@@ -131,28 +142,32 @@ for (const record of records) {
     rawNonEmpty++;
   }
 
-  const edit = normalizeCursorEdit(request, result);
-  const capturedEdit = record.zedResponse?.edits?.[0] ?? null;
-  if (Boolean(edit) !== Boolean(capturedEdit)) {
+  const edits = normalizeCursorEdits(request, result);
+  const capturedEdits = record.zedResponse?.edits ?? [];
+  if (edits.length !== capturedEdits.length) {
     replayMismatch++;
-  } else if (edit && capturedEdit) {
-    const same =
-      JSON.stringify(edit.range) === JSON.stringify(capturedEdit.range) &&
-      edit.text === capturedEdit.text;
-    if (!same) {
-      replayMismatch++;
-    }
+  } else if (
+    edits.some(
+      (edit, index) =>
+        JSON.stringify(edit.range) !== JSON.stringify(capturedEdits[index]?.range) ||
+        edit.text !== capturedEdits[index]?.text,
+    )
+  ) {
+    replayMismatch++;
   }
 
-  if (!edit) {
+  if (edits.length === 0) {
     continue;
   }
 
   normalizedShown++;
-  if (!/[A-Za-z0-9_$]/.test(edit.text)) {
+  if (edits.length > 1) {
+    multiEdit++;
+  }
+  if (!edits.some((edit) => /[A-Za-z0-9_$]/.test(edit.text))) {
     punctuationOnly++;
   }
-  const next = applyEdit(request.contents, edit);
+  const next = applyEdits(request.contents, edits);
   if (next !== request.contents) {
     changed++;
   }
@@ -163,7 +178,7 @@ for (const record of records) {
       path: record.relativePath,
       cursor: request.cursor,
       duplicates,
-      textPreview: edit.text.slice(0, 180),
+      textPreview: edits.map((edit) => edit.text).join("\n---\n").slice(0, 180),
     });
   }
 }
@@ -173,6 +188,7 @@ const summary = {
   rawNonEmpty,
   normalizedShown,
   changed,
+  multiEdit,
   rawShowRate: records.length ? rawNonEmpty / records.length : 0,
   normalizedShowRate: records.length ? normalizedShown / records.length : 0,
   duplicateRisk,

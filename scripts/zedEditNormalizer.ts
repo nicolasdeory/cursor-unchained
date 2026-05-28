@@ -148,6 +148,128 @@ function minimalDocumentEdit(
   };
 }
 
+function splitLinesPreserveEndings(contents: string): string[] {
+  if (contents.length === 0) {
+    return [];
+  }
+  return contents.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+}
+
+function offsetForLineIndex(lines: string[], lineIndex: number): number {
+  let offset = 0;
+  for (let index = 0; index < Math.min(lineIndex, lines.length); index++) {
+    offset += lines[index].length;
+  }
+  return offset;
+}
+
+function lineDiffEdits(
+  oldContents: string,
+  newContents: string,
+  reason: string,
+): NormalizedEdit[] | null {
+  if (sameText(oldContents, newContents)) {
+    return [];
+  }
+
+  const oldLines = splitLinesPreserveEndings(oldContents);
+  const newLines = splitLinesPreserveEndings(newContents);
+  if (oldLines.length * newLines.length > 1_000_000) {
+    const edit = minimalDocumentEdit(oldContents, newContents, reason);
+    return edit ? [edit] : [];
+  }
+
+  const width = newLines.length + 1;
+  const dp = new Uint16Array((oldLines.length + 1) * width);
+  for (let oldIndex = oldLines.length - 1; oldIndex >= 0; oldIndex--) {
+    for (let newIndex = newLines.length - 1; newIndex >= 0; newIndex--) {
+      const offset = oldIndex * width + newIndex;
+      dp[offset] =
+        oldLines[oldIndex] === newLines[newIndex]
+          ? dp[(oldIndex + 1) * width + newIndex + 1] + 1
+          : Math.max(dp[(oldIndex + 1) * width + newIndex], dp[oldIndex * width + newIndex + 1]);
+    }
+  }
+
+  const edits: NormalizedEdit[] = [];
+  let oldIndex = 0;
+  let newIndex = 0;
+  let pending:
+    | {
+        oldStart: number;
+        oldEnd: number;
+        newStart: number;
+        newEnd: number;
+      }
+    | null = null;
+
+  function markDelete() {
+    pending ??= { oldStart: oldIndex, oldEnd: oldIndex, newStart: newIndex, newEnd: newIndex };
+    pending.oldEnd = oldIndex + 1;
+    oldIndex++;
+  }
+
+  function markInsert() {
+    pending ??= { oldStart: oldIndex, oldEnd: oldIndex, newStart: newIndex, newEnd: newIndex };
+    pending.newEnd = newIndex + 1;
+    newIndex++;
+  }
+
+  function flush() {
+    if (!pending) {
+      return;
+    }
+    const startOffset = offsetForLineIndex(oldLines, pending.oldStart);
+    const endOffset = offsetForLineIndex(oldLines, pending.oldEnd);
+    const text = newLines.slice(pending.newStart, pending.newEnd).join("");
+    const edit = {
+      range: {
+        start: positionForOffset(oldContents, startOffset),
+        end: positionForOffset(oldContents, endOffset),
+      },
+      text,
+      reason,
+    };
+    if (edit.text.length > 0 || comparePositions(edit.range.start, edit.range.end) !== 0) {
+      edits.push(edit);
+    }
+    pending = null;
+  }
+
+  while (oldIndex < oldLines.length || newIndex < newLines.length) {
+    if (oldIndex < oldLines.length && newIndex < newLines.length && oldLines[oldIndex] === newLines[newIndex]) {
+      flush();
+      oldIndex++;
+      newIndex++;
+    } else if (
+      newIndex >= newLines.length ||
+      (oldIndex < oldLines.length &&
+        dp[(oldIndex + 1) * width + newIndex] >= dp[oldIndex * width + newIndex + 1])
+    ) {
+      markDelete();
+    } else {
+      markInsert();
+    }
+  }
+  flush();
+
+  return edits;
+}
+
+function applyNormalizedEdits(contents: string, edits: NormalizedEdit[]): string {
+  return [...edits]
+    .sort(
+      (left, right) =>
+        offsetForPosition(contents, right.range.start) -
+        offsetForPosition(contents, left.range.start),
+    )
+    .reduce((next, edit) => {
+      const start = offsetForPosition(next, edit.range.start);
+      const end = offsetForPosition(next, edit.range.end);
+      return next.slice(0, start) + edit.text + next.slice(end);
+    }, contents);
+}
+
 function normalizeCandidateText(text: string): string[] {
   const variants = new Set<string>();
   variants.add(text);
@@ -559,15 +681,36 @@ export function normalizeCursorEdit(
   request: ZedRequestForEdit,
   result: CursorResultForEdit,
 ): NormalizedEdit | null {
+  return normalizeCursorEdits(request, result)[0] ?? null;
+}
+
+export function normalizeCursorEdits(
+  request: ZedRequestForEdit,
+  result: CursorResultForEdit,
+): NormalizedEdit[] {
   const { directEdit, candidates } = cursorEditCandidates(request, result);
   if (directEdit) {
-    return directEdit;
+    if (directEdit.reason === "document-like") {
+      const lineEdits = lineDiffEdits(request.contents, result.text, "document-like-line-diff");
+      if (
+        lineEdits &&
+        lineEdits.length > 1 &&
+        duplicateDeclarationPenalty(
+          request.contents,
+          applyNormalizedEdits(request.contents, lineEdits),
+        ) === 0
+      ) {
+        return lineEdits;
+      }
+    }
+    return [directEdit];
   }
 
   const selected = bestCandidate(candidates);
   if (!selected || selected.score >= 450) {
-    return null;
+    return [];
   }
 
-  return minimalDocumentEdit(request.contents, selected.newContents, selected.reason);
+  const edit = minimalDocumentEdit(request.contents, selected.newContents, selected.reason);
+  return edit ? [edit] : [];
 }

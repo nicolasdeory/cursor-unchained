@@ -4,7 +4,7 @@ import path from "node:path";
 import fs from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { defaultStreamCppPayload } from "../src/lib/constants";
-import { normalizeCursorEdit } from "./zedEditNormalizer";
+import { normalizeCursorEdits } from "./zedEditNormalizer";
 import {
   CURSOR_BEARER_TOKEN,
   X_CURSOR_CLIENT_VERSION,
@@ -743,6 +743,7 @@ async function streamCppPayload(
   return await new Promise((resolve, reject) => {
     const req = https.request(options, (res: IncomingMessage) => {
       let dataBuffer = Buffer.alloc(0);
+      let settled = false;
       const result: CursorResult = {
         status: res.statusCode,
         source,
@@ -751,7 +752,19 @@ async function streamCppPayload(
         cursorPredictionTarget: null,
       };
 
+      const resolveOnce = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resolve(result);
+        res.destroy();
+      };
+
       res.on("data", (chunk: Buffer) => {
+        if (settled) {
+          return;
+        }
         dataBuffer = Buffer.concat([dataBuffer, chunk]);
 
         while (dataBuffer.length >= 5) {
@@ -814,18 +827,32 @@ async function streamCppPayload(
                 target.should_retrigger_cpp ?? target.shouldRetriggerCpp,
             };
           }
+          if (
+            (decoded.done_edit || decoded.doneEdit || decoded.done_stream || decoded.doneStream) &&
+            (result.text || result.cursorPredictionTarget)
+          ) {
+            resolveOnce();
+            return;
+          }
         }
       });
 
       res.on("end", () => {
+        if (settled) {
+          return;
+        }
         if (res.statusCode && res.statusCode >= 400) {
           reject(new Error(`Cursor StreamCpp failed with HTTP ${res.statusCode}`));
         } else {
-          resolve(result);
+          resolveOnce();
         }
       });
 
-      res.on("error", reject);
+      res.on("error", (error) => {
+        if (!settled) {
+          reject(error);
+        }
+      });
     });
 
     req.on("error", reject);
@@ -887,24 +914,27 @@ function toZedResponse(request: ZedRequest, result: CursorResult) {
   }
 
   if (result.text) {
-    const edit = normalizeCursorEdit(request, result);
-    if (edit) {
+    const normalizedEdits = normalizeCursorEdits(request, result);
+    if (normalizedEdits.length > 0) {
       if (DEBUG) {
         console.error(
           JSON.stringify({
-            applied: "edit",
+            applied: "edits",
             path: relativePath(request),
             cursor: request.cursor,
-            range: edit.range,
-            reason: edit.reason,
-            textPreview: edit.text.slice(0, 220),
+            editCount: normalizedEdits.length,
+            ranges: normalizedEdits.map((edit) => edit.range),
+            reasons: normalizedEdits.map((edit) => edit.reason),
+            textPreview: normalizedEdits.map((edit) => edit.text).join("\n---\n").slice(0, 220),
           }),
         );
       }
-      edits.push({
-        range: edit.range,
-        text: edit.text,
-      });
+      edits.push(
+        ...normalizedEdits.map((edit) => ({
+          range: edit.range,
+          text: edit.text,
+        })),
+      );
     } else if (DEBUG) {
       console.error(
         JSON.stringify({
@@ -920,6 +950,8 @@ function toZedResponse(request: ZedRequest, result: CursorResult) {
   if (result.cursorPredictionTarget?.relativePath) {
     response.jump = {
       path: result.cursorPredictionTarget.relativePath,
+      expected_content: result.cursorPredictionTarget.expectedContent,
+      should_retrigger: result.cursorPredictionTarget.shouldRetriggerCpp,
       position: {
         line: Math.max(0, result.cursorPredictionTarget.lineNumberOneIndexed - 1),
         column: 0,
@@ -931,6 +963,7 @@ function toZedResponse(request: ZedRequest, result: CursorResult) {
 }
 
 Bun.serve({
+  hostname: "127.0.0.1",
   port: PORT,
   async fetch(req) {
     const url = new URL(req.url);

@@ -114,49 +114,82 @@ async function runCase(name: string, contents: string, cursor: Position, absolut
 
   const edits = json.edits ?? [];
   const next = applyEdits(contents, edits);
-  console.log(
-    JSON.stringify({
-      name,
-      latencyMs: Math.round(elapsedMs),
-      edits: edits.length,
-      changed: next !== contents,
-      selectedProductIds: declarationCount(next, "selectedProductIds"),
-      plannedMerges: declarationCount(next, "plannedMerges"),
-      firstEditRange: edits[0]?.range ?? null,
-      firstEditTextLength: edits[0]?.text.length ?? 0,
-      firstEditPreview: edits[0]?.text.slice(0, 160) ?? "",
-    }),
-  );
+  const result = {
+    name,
+    latencyMs: Math.round(elapsedMs),
+    edits: edits.length,
+    changed: next !== contents,
+    selectedItemIds: declarationCount(next, "selectedItemIds"),
+    pendingUpdates: declarationCount(next, "pendingUpdates"),
+    firstEditRange: edits[0]?.range ?? null,
+    firstEditTextLength: edits[0]?.text.length ?? 0,
+    firstEditPreview: edits[0]?.text.slice(0, 160) ?? "",
+  };
+  console.log(JSON.stringify(result));
+  return result;
 }
 
 const simple = "function add(a: number, b: number) {\n  return \n}\n";
 
 const duplicateSensitive = [
-  "    const allProductIds = orderLines",
-  "      .filter((line) => line.productId)",
-  "      .map((line) => nullthrows(line.productId));",
+  "    const candidateItemIds = sourceRows",
+  "      .filter((row) => row.itemId)",
+  "      .map((row) => nullthrows(row.itemId));",
   "",
-  "    const matchingProducts =",
-  "      allProductIds.length > 0",
-  "        ? await this.productService.findMany({",
+  "    const matchingItems =",
+  "      candidateItemIds.length > 0",
+  "        ? await itemLookup.findMany({",
   "            where: {",
-  "              id: { in: allProductIds },",
-  "              category: { in: FEATURED_CATEGORY_SLUGS },",
+  "              id: { in: candidateItemIds },",
+  "              group: { in: VISIBLE_GROUPS },",
   "            },",
   "            select: { id: true },",
   "          })",
   "        : [];",
   "",
-  "    const selectedProductIds = new Set(matchingProducts.map((product) => product.id));",
-  "    const groupingEnabled = await this.featureFlagService.enabled(",
+  "    const selectedItemIds = new Set(matchingItems.map((item) => item.id));",
+  "    const layoutEnabled = await settings.isEnabled(",
   "      ctx,",
-  "      'grouping_enabled',",
+  "      'layout_enabled',",
   "    );",
   "",
-  "    const plannedMerges: PlannedMerge[] = [];",
+  "    const pendingUpdates: PendingUpdate[] = [];",
   "",
 ].join("\n");
 
-await runCase("simple-return", simple, { line: 1, column: 9 });
-await runCase("duplicate-sensitive-collection", duplicateSensitive, { line: 4, column: 18 });
-await runCase("duplicate-sensitive-selection", duplicateSensitive, { line: 15, column: 0 });
+const results = [
+  await runCase("simple-return", simple, { line: 1, column: 9 }),
+  await runCase("duplicate-sensitive-collection", duplicateSensitive, { line: 4, column: 18 }),
+  await runCase("duplicate-sensitive-selection", duplicateSensitive, { line: 15, column: 0 }),
+];
+
+const maxLatencyMs = Number(process.env.ZED_CURSOR_PROXY_MAX_LATENCY_MS ?? "2500");
+const failures: string[] = [];
+for (const result of results) {
+  if (result.latencyMs > maxLatencyMs) {
+    failures.push(`${result.name}: latency ${result.latencyMs}ms > ${maxLatencyMs}ms`);
+  }
+}
+
+const duplicateCollection = results.find((result) => result.name === "duplicate-sensitive-selection");
+if (duplicateCollection && duplicateCollection.selectedItemIds > 1) {
+  failures.push("duplicate-sensitive-selection duplicated selectedItemIds");
+}
+if (duplicateCollection && duplicateCollection.pendingUpdates > 1) {
+  failures.push("duplicate-sensitive-selection duplicated pendingUpdates");
+}
+
+console.log(
+  JSON.stringify({
+    summary: {
+      cases: results.length,
+      changed: results.filter((result) => result.changed).length,
+      maxLatencyMs: Math.max(...results.map((result) => result.latencyMs)),
+      failures,
+    },
+  }),
+);
+
+if (failures.length > 0) {
+  process.exitCode = 1;
+}
