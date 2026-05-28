@@ -137,7 +137,11 @@ fi
 
 if [[ "${INSTALL}" == "1" && ( "${updated}" == "1" || "${FORCE_INSTALL}" == "1" ) ]]; then
   cd "${PROXY_ROOT}"
-  exec bash scripts/macos/install-zed-cursor-tab.sh --zed-repo "${ZED_REPO}" "${INSTALL_ARGS[@]}"
+  if [[ "${#INSTALL_ARGS[@]}" -gt 0 ]]; then
+    exec bash scripts/macos/install-zed-cursor-tab.sh --zed-repo "${ZED_REPO}" "${INSTALL_ARGS[@]}"
+  else
+    exec bash scripts/macos/install-zed-cursor-tab.sh --zed-repo "${ZED_REPO}"
+  fi
 fi
 
 if [[ "${INSTALL}" == "1" ]]; then
