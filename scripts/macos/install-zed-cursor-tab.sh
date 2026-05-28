@@ -309,6 +309,48 @@ EOF
 
 chmod +x "${WRAPPER}" "${REAL_ZED}" "${MACOS}/cli"
 
+LOG_DIR="${HOME}/Library/Logs/ZedCursorTab"
+LOG_FILE="${LOG_DIR}/proxy.log"
+PLIST="${HOME}/Library/LaunchAgents/zed-cursor-tab-proxy.plist"
+LAUNCHD_TARGET="gui/$(/usr/bin/id -u)"
+
+mkdir -p "${LOG_DIR}" "${HOME}/Library/LaunchAgents"
+cat >"${PLIST}" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>zed-cursor-tab-proxy</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${BUN}</string>
+    <string>run</string>
+    <string>zed-proxy</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${PROXY_ROOT}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${LOG_FILE}</string>
+  <key>StandardErrorPath</key>
+  <string>${LOG_FILE}</string>
+</dict>
+</plist>
+PLIST
+
+/bin/launchctl remove zed-cursor-tab-proxy >/dev/null 2>&1 || true
+/bin/launchctl bootout "${LAUNCHD_TARGET}" "${PLIST}" >/dev/null 2>&1 || true
+if /bin/launchctl bootstrap "${LAUNCHD_TARGET}" "${PLIST}" >/dev/null 2>&1; then
+  /bin/launchctl kickstart -k "${LAUNCHD_TARGET}/zed-cursor-tab-proxy" >/dev/null 2>&1 || true
+  echo "Started Cursor Tab proxy LaunchAgent."
+else
+  echo "Warning: could not bootstrap Cursor Tab proxy LaunchAgent; the app wrapper will retry on launch."
+fi
+
 if /usr/bin/codesign --force --deep --sign - "${APP}" >/dev/null 2>&1; then
   echo "Ad-hoc signed ${APP}"
 else

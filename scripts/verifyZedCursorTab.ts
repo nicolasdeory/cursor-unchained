@@ -11,9 +11,11 @@ type CommandResult = {
 
 const proxyUrl = process.env.ZED_CURSOR_PROXY_URL ?? "http://127.0.0.1:17878/predict";
 const healthUrl = proxyUrl.replace(/\/predict$/, "/health");
+const acceptUrl = proxyUrl.replace(/\/predict$/, "/accept");
 const settingsPath =
   process.env.ZED_SETTINGS_PATH ?? path.join(os.homedir(), ".config", "zed", "settings.json");
 const appPath = process.env.ZED_CURSOR_TAB_APP ?? "/Applications/Zed Preview Cursor Tab.app";
+const launchAgentPath = path.join(os.homedir(), "Library", "LaunchAgents", "zed-cursor-tab-proxy.plist");
 const captureInput = process.env.ZED_CURSOR_PROXY_CAPTURE_INPUT ?? "captures/zed-cursor-tab";
 const skipLiveProbe = process.env.ZED_CURSOR_VERIFY_SKIP_LIVE === "1";
 
@@ -61,6 +63,24 @@ async function checkProxyHealth() {
   }
 
   failures.push(`proxy health failed after retries: ${lastError}`);
+}
+
+async function checkProxyAccept() {
+  console.log(`\n== proxy accept ==`);
+  try {
+    const response = await fetch(acceptUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: `verify-${Date.now()}` }),
+    });
+    const body = await response.text();
+    console.log(body);
+    if (!response.ok) {
+      failures.push(`proxy accept returned HTTP ${response.status}`);
+    }
+  } catch (error) {
+    failures.push(`proxy accept failed: ${error}`);
+  }
 }
 
 function stripJsonComments(source: string): string {
@@ -147,6 +167,50 @@ function checkAppBundle() {
     } else {
       console.log("codesign ok");
     }
+  }
+}
+
+function checkLaunchAgent() {
+  if (process.platform !== "darwin") {
+    return;
+  }
+
+  console.log(`\n== launch agent ==`);
+  if (!fs.existsSync(launchAgentPath)) {
+    failures.push(`missing proxy LaunchAgent: ${launchAgentPath}`);
+    return;
+  }
+  console.log(launchAgentPath);
+
+  const uid = process.getuid?.();
+  if (uid == null) {
+    warnings.push("cannot determine uid; skipping launchctl state check");
+    return;
+  }
+
+  const result = run("launchctl", ["launchctl", "print", `gui/${uid}/zed-cursor-tab-proxy`], {
+    quiet: true,
+  });
+  if (result.status !== 0) {
+    failures.push("proxy LaunchAgent is not loaded");
+    console.error(result.stderr.trim() || result.stdout.trim());
+    return;
+  }
+
+  const output = result.stdout;
+  const importantLines = output
+    .split("\n")
+    .filter((line) => /path =|type =|state =|properties =/.test(line))
+    .join("\n");
+  console.log(importantLines);
+  if (!output.includes("type = LaunchAgent")) {
+    failures.push("proxy launchctl job is not a LaunchAgent");
+  }
+  if (!output.includes("state = running")) {
+    failures.push("proxy LaunchAgent is not running");
+  }
+  if (!output.includes("keepalive") || !output.includes("runatload")) {
+    failures.push("proxy LaunchAgent is missing keepalive/runatload");
   }
 }
 
@@ -283,12 +347,17 @@ function checkLiveProbe() {
   if (summary.failures?.length > 0) {
     failures.push(`live probe failures: ${summary.failures.join("; ")}`);
   }
+  if (summary.changed < 1) {
+    failures.push("live probe produced no changed predictions");
+  }
 }
 
 readSettings();
 checkAppBundle();
 checkCursorCredentials();
+checkLaunchAgent();
 await checkProxyHealth();
+await checkProxyAccept();
 checkCommand(run("unit tests", ["bun", "run", "test:zed-proxy"]));
 checkCaptureEval();
 checkLiveProbe();
