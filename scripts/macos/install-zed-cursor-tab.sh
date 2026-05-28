@@ -8,7 +8,10 @@ APP="${APP:-/Applications/Zed Preview Cursor Tab.app}"
 BACKUP="${BACKUP:-/Applications/Zed Preview Stock.app}"
 PORT="${ZED_CURSOR_PROXY_PORT:-17878}"
 SETTINGS_PATH="${ZED_SETTINGS_PATH:-${HOME}/.config/zed/settings.json}"
+APPTIVATE_HOTKEYS="${APPTIVATE_HOTKEYS:-${HOME}/Library/Application Support/Apptivate/hotkeys}"
 CONFIGURE_SETTINGS=1
+CONFIGURE_DOCK=1
+CONFIGURE_APPTIVATE=1
 MIN_FREE_GB="${ZED_CURSOR_MIN_FREE_GB:-25}"
 CLEAN_BUILD_CACHE=0
 
@@ -22,7 +25,11 @@ Options:
   --app PATH            Destination app bundle. Default: /Applications/Zed Preview Cursor Tab.app
   --backup PATH         Backup path for stock Zed Preview.app.
   --settings-path PATH  Zed settings file to update. Default: ~/.config/zed/settings.json
+  --apptivate-hotkeys PATH
+                        Apptivate hotkeys plist. Default: ~/Library/Application Support/Apptivate/hotkeys
   --no-settings         Do not update Zed settings.
+  --no-dock             Do not add the patched app to the Dock.
+  --no-apptivate        Do not retarget Apptivate Ctrl-2 to the patched app.
   --no-build            Skip cargo build and install already-built release binaries.
   --clean-build-cache   Remove regenerable Zed debug/incremental build artifacts before building.
   --min-free-gb GB      Minimum free disk space required before building. Default: 25.
@@ -30,7 +37,7 @@ Options:
 
 Environment:
   ZED_REPO, SOURCE_APP, APP, BACKUP, ZED_SETTINGS_PATH, ZED_CURSOR_PROXY_PORT,
-  ZED_CURSOR_MIN_FREE_GB, CARGO_INCREMENTAL
+  ZED_CURSOR_MIN_FREE_GB, APPTIVATE_HOTKEYS, CARGO_INCREMENTAL
 EOF
 }
 
@@ -57,8 +64,20 @@ while [[ $# -gt 0 ]]; do
       SETTINGS_PATH="$2"
       shift 2
       ;;
+    --apptivate-hotkeys)
+      APPTIVATE_HOTKEYS="$2"
+      shift 2
+      ;;
     --no-settings)
       CONFIGURE_SETTINGS=0
+      shift
+      ;;
+    --no-dock)
+      CONFIGURE_DOCK=0
+      shift
+      ;;
+    --no-apptivate)
+      CONFIGURE_APPTIVATE=0
       shift
       ;;
     --no-build)
@@ -185,6 +204,142 @@ fs.writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
 '
   echo "Configured Zed edit predictions to use ${predict_url}"
 }
+
+configure_dock() {
+  local app_url app_label
+
+  app_url="$(APP="${APP}" "${BUN}" --eval '
+const { pathToFileURL } = require("node:url");
+let url = pathToFileURL(process.env.APP).href;
+if (!url.endsWith("/")) url += "/";
+process.stdout.write(url);
+')"
+  app_label="$(basename "${APP}" .app)"
+
+  if /usr/bin/defaults read com.apple.dock persistent-apps 2>/dev/null | /usr/bin/grep -Fq "${app_url}"; then
+    echo "${app_label} is already in the Dock."
+    return 0
+  fi
+
+  echo "Adding ${app_label} to the Dock."
+  /usr/bin/defaults write com.apple.dock persistent-apps -array-add "<dict><key>tile-data</key><dict><key>file-data</key><dict><key>_CFURLString</key><string>${app_url}</string><key>_CFURLStringType</key><integer>15</integer></dict><key>file-label</key><string>${app_label}</string><key>file-type</key><integer>41</integer></dict><key>tile-type</key><string>file-tile</string></dict>"
+  /usr/bin/killall Dock >/dev/null 2>&1 || true
+}
+
+configure_apptivate_hotkey() (
+  set -euo pipefail
+
+  local tmp_dir backup python
+  if [[ ! -f "${APPTIVATE_HOTKEYS}" ]]; then
+    echo "Apptivate hotkeys file not found; skipping Ctrl-2 setup."
+    return 0
+  fi
+  if [[ ! -x "/usr/bin/clang" ]]; then
+    echo "clang not found; skipping Apptivate Ctrl-2 setup."
+    return 0
+  fi
+  python="$(command -v python3 || true)"
+  if [[ -z "${python}" ]]; then
+    echo "python3 not found; skipping Apptivate Ctrl-2 setup."
+    return 0
+  fi
+
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "${tmp_dir}"' EXIT
+
+  cat >"${tmp_dir}/make_alias.c" <<'EOF'
+#include <CoreServices/CoreServices.h>
+#include <stdio.h>
+
+int main(int argc, char **argv) {
+  if (argc != 2) {
+    fprintf(stderr, "usage: make_alias PATH\n");
+    return 2;
+  }
+
+  FSRef ref;
+  Boolean is_directory = false;
+  OSStatus err = FSPathMakeRef((const UInt8 *)argv[1], &ref, &is_directory);
+  if (err != noErr) {
+    fprintf(stderr, "FSPathMakeRef failed: %d\n", (int)err);
+    return 1;
+  }
+
+  AliasHandle alias = NULL;
+  err = FSNewAlias(NULL, &ref, &alias);
+  if (err != noErr || alias == NULL) {
+    fprintf(stderr, "FSNewAlias failed: %d\n", (int)err);
+    return 1;
+  }
+
+  Size size = GetHandleSize((Handle)alias);
+  HLock((Handle)alias);
+  fwrite(*alias, 1, size, stdout);
+  HUnlock((Handle)alias);
+  DisposeHandle((Handle)alias);
+  return 0;
+}
+EOF
+
+  /usr/bin/clang -Wno-deprecated-declarations -framework CoreServices "${tmp_dir}/make_alias.c" -o "${tmp_dir}/make_alias"
+  "${tmp_dir}/make_alias" "${APP}" >"${tmp_dir}/target.alias"
+
+  backup="${APPTIVATE_HOTKEYS}.backup.$(date +%Y%m%d%H%M%S)"
+  cp "${APPTIVATE_HOTKEYS}" "${backup}"
+
+  "${python}" - "${APPTIVATE_HOTKEYS}" "${tmp_dir}/target.alias" <<'PY'
+import plistlib
+import sys
+from pathlib import Path
+
+hotkeys_path = Path(sys.argv[1])
+alias_data = Path(sys.argv[2]).read_bytes()
+
+with hotkeys_path.open("rb") as f:
+    plist = plistlib.load(f)
+
+objects = plist["$objects"]
+
+def uid_value(value):
+    if isinstance(value, plistlib.UID):
+        return value.data
+    raise TypeError(f"expected UID, got {type(value)!r}")
+
+alias_data_index = None
+item_index = None
+
+for index, item in enumerate(objects):
+    if not isinstance(item, dict):
+        continue
+    if "fileAlias" not in item or "hotkeys" not in item:
+        continue
+
+    hotkeys_array = objects[uid_value(item["hotkeys"])]
+    for hotkey_uid in hotkeys_array.get("NS.objects", []):
+        hotkey = objects[uid_value(hotkey_uid)]
+        combo = objects[uid_value(hotkey["keyCombo"])]
+        if combo.get("keyCode") == 19 and combo.get("mods") == 4352:
+            alias = objects[uid_value(item["fileAlias"])]
+            alias_data_index = uid_value(alias["$0"])
+            item_index = index
+            break
+    if alias_data_index is not None:
+        break
+
+if alias_data_index is None:
+    raise SystemExit("Could not find Apptivate Ctrl-2 entry")
+
+objects[alias_data_index] = alias_data
+
+with hotkeys_path.open("wb") as f:
+    plistlib.dump(plist, f, fmt=plistlib.FMT_BINARY, sort_keys=False)
+
+print(f"Updated Apptivate item {item_index} alias data object {alias_data_index}")
+PY
+
+  echo "Backed up previous Apptivate hotkeys to ${backup}"
+  echo "Updated Apptivate Ctrl-2 to ${APP}"
+)
 
 free_disk_gb() {
   local path free_kb
@@ -420,6 +575,18 @@ if /usr/bin/codesign --force --deep --sign - "${APP}" >/dev/null 2>&1; then
   echo "Ad-hoc signed ${APP}"
 else
   echo "Warning: codesign failed; macOS may ask before launching the patched app." >&2
+fi
+
+if [[ "${CONFIGURE_DOCK}" == "1" ]]; then
+  if ! configure_dock; then
+    echo "Warning: could not add ${APP} to the Dock." >&2
+  fi
+fi
+
+if [[ "${CONFIGURE_APPTIVATE}" == "1" ]]; then
+  if ! configure_apptivate_hotkey; then
+    echo "Warning: could not update Apptivate Ctrl-2 for ${APP}." >&2
+  fi
 fi
 
 if [[ "${CONFIGURE_SETTINGS}" == "1" ]]; then

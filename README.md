@@ -88,7 +88,7 @@ git -C ../zed switch cursor-tab-external-provider
 bun run install:zed-macos
 ```
 
-The installer builds the patched Zed release binary, copies the existing Zed Preview app bundle so the normal icon and metadata are preserved, backs up and updates `~/.config/zed/settings.json`, and installs the app as:
+The installer builds the patched Zed release binary, copies the existing Zed Preview app bundle so the normal icon and metadata are preserved, backs up and updates `~/.config/zed/settings.json`, adds the app to the Dock, retargets Apptivate Ctrl-2 when Apptivate is installed, and installs the app as:
 
 ```text
 /Applications/Zed Preview Cursor Tab.app
@@ -104,6 +104,12 @@ To leave Zed settings untouched:
 
 ```bash
 bun run install:zed-macos -- --no-settings
+```
+
+To leave your Dock or Apptivate hotkeys untouched:
+
+```bash
+bun run install:zed-macos -- --no-dock --no-apptivate
 ```
 
 To check for upstream Zed changes, rebase the patched branch, and reinstall when the update succeeds:

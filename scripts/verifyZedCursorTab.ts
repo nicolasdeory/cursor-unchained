@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 type CommandResult = {
   name: string;
@@ -17,8 +18,11 @@ const settingsPath =
 const appPath = process.env.ZED_CURSOR_TAB_APP ?? "/Applications/Zed Preview Cursor Tab.app";
 const zedRepoPath = process.env.ZED_REPO ?? path.resolve(process.cwd(), "..", "zed");
 const launchAgentPath = path.join(os.homedir(), "Library", "LaunchAgents", "zed-cursor-tab-proxy.plist");
+const apptivateHotkeysPath =
+  process.env.APPTIVATE_HOTKEYS ?? path.join(os.homedir(), "Library", "Application Support", "Apptivate", "hotkeys");
 const captureInput = process.env.ZED_CURSOR_PROXY_CAPTURE_INPUT ?? "captures/zed-cursor-tab";
 const skipLiveProbe = process.env.ZED_CURSOR_VERIFY_SKIP_LIVE === "1";
+const strictDailyDriver = process.env.ZED_CURSOR_VERIFY_STRICT_DAILY_DRIVER === "1";
 
 const failures: string[] = [];
 const warnings: string[] = [];
@@ -270,6 +274,199 @@ function checkLaunchAgent() {
   }
 }
 
+function dailyDriverIssue(message: string) {
+  if (strictDailyDriver) {
+    failures.push(message);
+  } else {
+    warnings.push(message);
+  }
+}
+
+function checkDailyDriverIntegration() {
+  if (process.platform !== "darwin") {
+    return;
+  }
+
+  console.log(`\n== daily driver integration ==`);
+
+  let appUrl = pathToFileURL(appPath).href;
+  if (!appUrl.endsWith("/")) {
+    appUrl += "/";
+  }
+
+  const dock = run("dock", ["defaults", "read", "com.apple.dock", "persistent-apps"], { quiet: true });
+  if (dock.status !== 0) {
+    dailyDriverIssue("could not read Dock persistent apps");
+  } else if (!dock.stdout.includes(appUrl)) {
+    dailyDriverIssue(`${appPath} is not pinned in the Dock`);
+  } else {
+    console.log("Dock: pinned");
+  }
+
+  if (!fs.existsSync(apptivateHotkeysPath)) {
+    dailyDriverIssue(`Apptivate hotkeys file not found: ${apptivateHotkeysPath}`);
+    return;
+  }
+
+  const python = run("python3", ["python3", "--version"], { quiet: true });
+  if (python.status !== 0) {
+    dailyDriverIssue("python3 unavailable; cannot inspect Apptivate hotkeys");
+    return;
+  }
+  const clang = run("clang", ["/usr/bin/clang", "--version"], { quiet: true });
+  if (clang.status !== 0) {
+    dailyDriverIssue("clang unavailable; cannot resolve Apptivate aliases");
+    return;
+  }
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "zed-cursor-tab-verify-"));
+  const script = `
+import plistlib
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+alias_path = Path(sys.argv[2])
+with path.open("rb") as f:
+    plist = plistlib.load(f)
+
+objects = plist.get("$objects", [])
+
+def uid_value(value):
+    if isinstance(value, plistlib.UID):
+        return value.data
+    raise TypeError(f"expected UID, got {type(value)!r}")
+
+for item in objects:
+    if not isinstance(item, dict):
+        continue
+    if "fileAlias" not in item or "hotkeys" not in item:
+        continue
+    hotkeys_array = objects[uid_value(item["hotkeys"])]
+    for hotkey_uid in hotkeys_array.get("NS.objects", []):
+        hotkey = objects[uid_value(hotkey_uid)]
+        combo = objects[uid_value(hotkey["keyCombo"])]
+        if combo.get("keyCode") == 19 and combo.get("mods") == 4352:
+            alias = objects[uid_value(item["fileAlias"])]
+            alias_path.write_bytes(objects[uid_value(alias["$0"])])
+            raise SystemExit(0)
+
+raise SystemExit("missing Apptivate Ctrl-2 entry")
+`;
+  try {
+    const aliasPath = path.join(tempDir, "target.alias");
+    const apptivate = run("apptivate", ["python3", "-c", script, apptivateHotkeysPath, aliasPath], { quiet: true });
+    if (apptivate.status !== 0) {
+      dailyDriverIssue(apptivate.stderr.trim() || apptivate.stdout.trim() || "could not inspect Apptivate Ctrl-2");
+      return;
+    }
+
+    const resolverPath = path.join(tempDir, "resolve_alias.c");
+    const resolverBin = path.join(tempDir, "resolve_alias");
+    fs.writeFileSync(
+      resolverPath,
+      `
+#include <CoreServices/CoreServices.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/param.h>
+
+int main(int argc, char **argv) {
+  if (argc != 2) {
+    fprintf(stderr, "usage: resolve_alias ALIAS_FILE\\n");
+    return 2;
+  }
+
+  FILE *file = fopen(argv[1], "rb");
+  if (file == NULL) {
+    perror("fopen");
+    return 1;
+  }
+  if (fseek(file, 0, SEEK_END) != 0) {
+    perror("fseek");
+    fclose(file);
+    return 1;
+  }
+  long size = ftell(file);
+  if (size <= 0) {
+    fprintf(stderr, "empty alias file\\n");
+    fclose(file);
+    return 1;
+  }
+  rewind(file);
+
+  char *buffer = malloc((size_t)size);
+  if (buffer == NULL) {
+    fclose(file);
+    return 1;
+  }
+  if (fread(buffer, 1, (size_t)size, file) != (size_t)size) {
+    perror("fread");
+    free(buffer);
+    fclose(file);
+    return 1;
+  }
+  fclose(file);
+
+  Handle handle = NewHandle(size);
+  if (handle == NULL) {
+    free(buffer);
+    return 1;
+  }
+  HLock(handle);
+  memcpy(*handle, buffer, (size_t)size);
+  HUnlock(handle);
+  free(buffer);
+
+  FSRef target;
+  Boolean wasChanged = false;
+  OSStatus err = FSResolveAlias(NULL, (AliasHandle)handle, &target, &wasChanged);
+  DisposeHandle(handle);
+  if (err != noErr) {
+    fprintf(stderr, "FSResolveAlias failed: %d\\n", (int)err);
+    return 1;
+  }
+
+  UInt8 resolvedPath[PATH_MAX];
+  err = FSRefMakePath(&target, resolvedPath, sizeof(resolvedPath));
+  if (err != noErr) {
+    fprintf(stderr, "FSRefMakePath failed: %d\\n", (int)err);
+    return 1;
+  }
+
+  printf("%s\\n", resolvedPath);
+  return 0;
+}
+`,
+    );
+
+    const compile = run(
+      "compile alias resolver",
+      ["/usr/bin/clang", "-Wno-deprecated-declarations", "-framework", "CoreServices", resolverPath, "-o", resolverBin],
+      { quiet: true },
+    );
+    if (compile.status !== 0) {
+      dailyDriverIssue(compile.stderr.trim() || compile.stdout.trim() || "could not compile Apptivate alias resolver");
+      return;
+    }
+
+    const resolved = run("resolve alias", [resolverBin, aliasPath], { quiet: true });
+    if (resolved.status !== 0) {
+      dailyDriverIssue(resolved.stderr.trim() || resolved.stdout.trim() || "could not resolve Apptivate Ctrl-2 alias");
+      return;
+    }
+    const resolvedPath = resolved.stdout.trim();
+    if (resolvedPath !== appPath) {
+      dailyDriverIssue(`Apptivate Ctrl-2 points to ${resolvedPath}, not ${appPath}`);
+      return;
+    }
+    console.log("Apptivate: Ctrl-2 points to patched app");
+  } finally {
+    fs.rmSync(tempDir, { force: true, recursive: true });
+  }
+}
+
 function checkCommand(result: CommandResult) {
   if (result.status !== 0) {
     failures.push(`${result.name} failed with exit code ${result.status}`);
@@ -413,6 +610,7 @@ checkAppBundle();
 checkInstallMetadata();
 checkCursorCredentials();
 checkLaunchAgent();
+checkDailyDriverIntegration();
 await checkProxyHealth();
 await checkProxyAccept();
 checkCommand(run("unit tests", ["bun", "run", "test:zed-proxy"]));
