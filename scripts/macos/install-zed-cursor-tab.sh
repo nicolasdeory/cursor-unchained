@@ -220,12 +220,15 @@ if [[ ! -d "${APP}" ]]; then
 fi
 
 MACOS="${APP}/Contents/MacOS"
+RESOURCES="${APP}/Contents/Resources"
 WRAPPER="${MACOS}/zed"
 REAL_ZED="${MACOS}/zed-bin"
+METADATA="${RESOURCES}/zed-cursor-tab.json"
 
 echo "Installing release Zed binary into ${APP}"
 cp "${RELEASE_ZED}" "${REAL_ZED}"
 cp "${RELEASE_CLI}" "${MACOS}/cli"
+mkdir -p "${RESOURCES}"
 
 cat >"${WRAPPER}" <<EOF
 #!/usr/bin/env bash
@@ -308,6 +311,21 @@ exec "\$(dirname "\${BASH_SOURCE[0]}")/zed-bin" "\$@"
 EOF
 
 chmod +x "${WRAPPER}" "${REAL_ZED}" "${MACOS}/cli"
+
+ZED_COMMIT="$(git -C "${ZED_REPO}" rev-parse HEAD 2>/dev/null || true)"
+PROXY_COMMIT="$(git -C "${PROXY_ROOT}" rev-parse HEAD 2>/dev/null || true)"
+INSTALLED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+METADATA="${METADATA}" ZED_COMMIT="${ZED_COMMIT}" PROXY_COMMIT="${PROXY_COMMIT}" INSTALLED_AT="${INSTALLED_AT}" PORT="${PORT}" "${BUN}" --eval '
+const fs = require("node:fs");
+const metadata = {
+  schema: 1,
+  installed_at: process.env.INSTALLED_AT,
+  zed_commit: process.env.ZED_COMMIT || null,
+  proxy_commit: process.env.PROXY_COMMIT || null,
+  proxy_port: Number(process.env.PORT),
+};
+fs.writeFileSync(process.env.METADATA, `${JSON.stringify(metadata, null, 2)}\n`);
+'
 
 LOG_DIR="${HOME}/Library/Logs/ZedCursorTab"
 LOG_FILE="${LOG_DIR}/proxy.log"

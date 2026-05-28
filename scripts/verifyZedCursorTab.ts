@@ -15,6 +15,7 @@ const acceptUrl = proxyUrl.replace(/\/predict$/, "/accept");
 const settingsPath =
   process.env.ZED_SETTINGS_PATH ?? path.join(os.homedir(), ".config", "zed", "settings.json");
 const appPath = process.env.ZED_CURSOR_TAB_APP ?? "/Applications/Zed Preview Cursor Tab.app";
+const zedRepoPath = process.env.ZED_REPO ?? path.resolve(process.cwd(), "..", "zed");
 const launchAgentPath = path.join(os.homedir(), "Library", "LaunchAgents", "zed-cursor-tab-proxy.plist");
 const captureInput = process.env.ZED_CURSOR_PROXY_CAPTURE_INPUT ?? "captures/zed-cursor-tab";
 const skipLiveProbe = process.env.ZED_CURSOR_VERIFY_SKIP_LIVE === "1";
@@ -155,6 +156,13 @@ function checkAppBundle() {
   }
   console.log(appPath);
 
+  for (const executable of ["Contents/MacOS/zed", "Contents/MacOS/zed-bin", "Contents/MacOS/cli"]) {
+    const executablePath = path.join(appPath, executable);
+    if (!fs.existsSync(executablePath)) {
+      failures.push(`missing app executable: ${executable}`);
+    }
+  }
+
   if (process.platform === "darwin") {
     const result = run(
       "codesign",
@@ -167,6 +175,54 @@ function checkAppBundle() {
     } else {
       console.log("codesign ok");
     }
+  }
+}
+
+function gitHead(repoPath: string): string | null {
+  if (!fs.existsSync(repoPath)) {
+    return null;
+  }
+
+  const result = run("git rev-parse", ["git", "-C", repoPath, "rev-parse", "HEAD"], { quiet: true });
+  if (result.status !== 0) {
+    return null;
+  }
+
+  return result.stdout.trim() || null;
+}
+
+function checkInstallMetadata() {
+  console.log(`\n== install metadata ==`);
+  const metadataPath = path.join(appPath, "Contents", "Resources", "zed-cursor-tab.json");
+  if (!fs.existsSync(metadataPath)) {
+    failures.push(`missing app install metadata: ${metadataPath}`);
+    return;
+  }
+
+  const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+  console.log(
+    JSON.stringify({
+      installed_at: metadata.installed_at,
+      zed_commit: metadata.zed_commit,
+      proxy_commit: metadata.proxy_commit,
+      proxy_port: metadata.proxy_port,
+    }),
+  );
+
+  const currentZedCommit = gitHead(zedRepoPath);
+  const currentProxyCommit = gitHead(process.cwd());
+  if (currentZedCommit && metadata.zed_commit && metadata.zed_commit !== currentZedCommit) {
+    failures.push(
+      `installed Zed commit ${metadata.zed_commit} does not match checkout ${currentZedCommit}; rerun install:zed-macos`,
+    );
+  }
+  if (currentProxyCommit && metadata.proxy_commit && metadata.proxy_commit !== currentProxyCommit) {
+    failures.push(
+      `installed proxy commit ${metadata.proxy_commit} does not match checkout ${currentProxyCommit}; rerun install:zed-macos -- --no-build`,
+    );
+  }
+  if (metadata.proxy_port !== Number(new URL(proxyUrl).port)) {
+    failures.push(`installed proxy port ${metadata.proxy_port} does not match ${proxyUrl}`);
   }
 }
 
@@ -354,6 +410,7 @@ function checkLiveProbe() {
 
 readSettings();
 checkAppBundle();
+checkInstallMetadata();
 checkCursorCredentials();
 checkLaunchAgent();
 await checkProxyHealth();
