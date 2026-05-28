@@ -244,10 +244,16 @@ if ! /usr/bin/curl -fsS "\${HEALTH_URL}" >/dev/null 2>&1; then
   if [[ -z "\${BUN}" || ! -x "\${BUN}" ]]; then
     echo "Cannot find bun to start Cursor Tab proxy." >>"\${LOG_FILE}"
   else
-    (
-      cd "\${PROXY_ROOT}"
-      exec "\${BUN}" run zed-proxy
-    ) >>"\${LOG_FILE}" 2>&1 &
+    if /bin/launchctl list | /usr/bin/grep -q '^.*[[:space:]]zed-cursor-tab-proxy$'; then
+      /bin/launchctl remove zed-cursor-tab-proxy >/dev/null 2>&1 || true
+    fi
+
+    if ! /bin/launchctl submit -l zed-cursor-tab-proxy -- /bin/zsh -lc "cd \\"\${PROXY_ROOT}\\" && exec \\"\${BUN}\\" run zed-proxy >> \\"\${LOG_FILE}\\" 2>&1"; then
+      (
+        cd "\${PROXY_ROOT}"
+        exec "\${BUN}" run zed-proxy
+      ) >>"\${LOG_FILE}" 2>&1 &
+    fi
 
     for _ in {1..50}; do
       if /usr/bin/curl -fsS "\${HEALTH_URL}" >/dev/null 2>&1; then
