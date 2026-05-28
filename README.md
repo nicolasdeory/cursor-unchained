@@ -118,6 +118,12 @@ The updater refuses to run when the Zed checkout has local changes or is detache
 bun run update:zed-macos -- --dry-run
 ```
 
+To verify the local app, Zed settings, proxy health, capture quality gates, and live Cursor-backed probe:
+
+```bash
+bun run verify:zed-macos
+```
+
 If Xcode reports a missing Metal Toolchain during incremental release builds, run:
 
 ```bash
