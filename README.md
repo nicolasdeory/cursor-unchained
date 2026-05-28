@@ -118,6 +118,12 @@ The updater refuses to run when the Zed checkout has local changes or is detache
 bun run update:zed-macos -- --dry-run
 ```
 
+To check whether the local checkout or installed app is stale without rebasing or rebuilding:
+
+```bash
+bun run status:zed-macos
+```
+
 To verify the local app, Zed settings, Cursor credentials, proxy health, capture quality gates, and live Cursor-backed probe:
 
 ```bash

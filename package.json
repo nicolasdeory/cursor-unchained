@@ -16,6 +16,7 @@
 		"verify:zed-macos": "bun run scripts/verifyZedCursorTab.ts",
 		"install:zed-macos": "bash scripts/macos/install-zed-cursor-tab.sh",
 		"update:zed-macos": "bash scripts/macos/update-zed-cursor-tab.sh",
+		"status:zed-macos": "bash scripts/macos/status-zed-cursor-tab.sh",
 		"zed-proxy": "bun run scripts/zedExternalProxy.ts",
 		"streamCpp": "bun run scripts/streamCpp.ts",
 		"refreshTabContext": "bun run scripts/refreshTabContext.ts"
