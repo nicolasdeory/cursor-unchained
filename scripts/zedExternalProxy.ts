@@ -33,6 +33,7 @@ type ZedRequest = {
 type CursorResult = {
   status?: number;
   source?: "exact" | "legacy";
+  bindingId?: string;
   text: string;
   rangeToReplace?: {
     startLine: number;
@@ -725,9 +726,13 @@ async function streamCppPayload(
           const range = decoded.range_to_replace ?? decoded.rangeToReplace;
           const target =
             decoded.cursor_prediction_target ?? decoded.cursorPredictionTarget;
+          const bindingId = decoded.binding_id ?? decoded.bindingId;
 
           if (decoded.text) {
             result.text += decoded.text;
+          }
+          if (bindingId) {
+            result.bindingId = bindingId;
           }
           if (range) {
             const nextRange = {
@@ -831,7 +836,7 @@ async function streamCpp(request: ZedRequest): Promise<CursorResult> {
 }
 
 function toZedResponse(request: ZedRequest, result: CursorResult) {
-  const id = crypto.randomUUID();
+  const id = result.bindingId || crypto.randomUUID();
   const edits = [];
 
   if (DEBUG) {
@@ -844,6 +849,7 @@ function toZedResponse(request: ZedRequest, result: CursorResult) {
         ),
         source: result.source,
         status: result.status,
+        bindingId: result.bindingId ? "present" : "missing",
         textLength: result.text.length,
         rangeToReplace: result.rangeToReplace,
         cursorPredictionTarget: result.cursorPredictionTarget,
@@ -908,6 +914,20 @@ Bun.serve({
     const url = new URL(req.url);
 
     if (req.method === "GET" && url.pathname === "/health") {
+      return json({ ok: true });
+    }
+
+    if (req.method === "POST" && url.pathname === "/accept") {
+      const body = (await req.json().catch(() => ({}))) as { id?: string };
+      appendCapture({
+        schema: 1,
+        capturedAt: new Date().toISOString(),
+        type: "accept",
+        id: body.id,
+      });
+      if (DEBUG) {
+        console.error(JSON.stringify({ accepted: body.id ? "prediction" : "missing-id" }));
+      }
       return json({ ok: true });
     }
 

@@ -176,9 +176,13 @@ fs.writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
 if [[ "${BUILD}" == "1" ]]; then
   INCREMENTAL="${CARGO_INCREMENTAL:-1}"
   if [[ "${INCREMENTAL}" != "0" ]] && ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then
-    echo "Metal Toolchain is unavailable for Xcode's macOS SDK; using non-incremental release build."
-    echo "For faster future builds, run: xcodebuild -downloadComponent MetalToolchain"
-    INCREMENTAL=0
+    echo "Metal Toolchain was not resolved by xcrun; clearing xcrun cache and retrying."
+    xcrun -k >/dev/null 2>&1 || true
+    if ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then
+      echo "Metal Toolchain is unavailable for Xcode's macOS SDK; using non-incremental release build."
+      echo "For faster future builds, run: xcodebuild -downloadComponent MetalToolchain && xcrun -k"
+      INCREMENTAL=0
+    fi
   fi
 
   (
@@ -232,6 +236,8 @@ PORT="\${ZED_CURSOR_PROXY_PORT:-${PORT}}"
 HEALTH_URL="http://127.0.0.1:\${PORT}/health"
 LOG_DIR="\${HOME}/Library/Logs/ZedCursorTab"
 LOG_FILE="\${LOG_DIR}/proxy.log"
+PLIST="\${HOME}/Library/LaunchAgents/zed-cursor-tab-proxy.plist"
+LAUNCHD_TARGET="gui/\$(/usr/bin/id -u)"
 BUN="${BUN}"
 
 mkdir -p "\${LOG_DIR}"
@@ -244,11 +250,41 @@ if ! /usr/bin/curl -fsS "\${HEALTH_URL}" >/dev/null 2>&1; then
   if [[ -z "\${BUN}" || ! -x "\${BUN}" ]]; then
     echo "Cannot find bun to start Cursor Tab proxy." >>"\${LOG_FILE}"
   else
-    if /bin/launchctl list | /usr/bin/grep -q '^.*[[:space:]]zed-cursor-tab-proxy$'; then
-      /bin/launchctl remove zed-cursor-tab-proxy >/dev/null 2>&1 || true
+    mkdir -p "\${HOME}/Library/LaunchAgents"
+    cat >"\${PLIST}" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>zed-cursor-tab-proxy</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>\${BUN}</string>
+    <string>run</string>
+    <string>zed-proxy</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>\${PROXY_ROOT}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>\${LOG_FILE}</string>
+  <key>StandardErrorPath</key>
+  <string>\${LOG_FILE}</string>
+</dict>
+</plist>
+PLIST
+
+    /bin/launchctl remove zed-cursor-tab-proxy >/dev/null 2>&1 || true
+    /bin/launchctl bootout "\${LAUNCHD_TARGET}" "\${PLIST}" >/dev/null 2>&1 || true
+    if ! /bin/launchctl bootstrap "\${LAUNCHD_TARGET}" "\${PLIST}" >/dev/null 2>&1; then
+      /bin/launchctl kickstart -k "\${LAUNCHD_TARGET}/zed-cursor-tab-proxy" >/dev/null 2>&1 || true
     fi
 
-    if ! /bin/launchctl submit -l zed-cursor-tab-proxy -- /bin/zsh -lc "cd \\"\${PROXY_ROOT}\\" && exec \\"\${BUN}\\" run zed-proxy >> \\"\${LOG_FILE}\\" 2>&1"; then
+    if ! /bin/launchctl kickstart -k "\${LAUNCHD_TARGET}/zed-cursor-tab-proxy" >/dev/null 2>&1; then
       (
         cd "\${PROXY_ROOT}"
         exec "\${BUN}" run zed-proxy

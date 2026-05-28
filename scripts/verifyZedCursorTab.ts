@@ -44,12 +44,23 @@ function run(name: string, cmd: string[], options: { quiet?: boolean } = {}): Co
 
 async function checkProxyHealth() {
   console.log(`\n== proxy health ==`);
-  const response = await fetch(healthUrl);
-  const body = await response.text();
-  console.log(body);
-  if (!response.ok) {
-    failures.push(`proxy health returned HTTP ${response.status}`);
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 20; attempt++) {
+    try {
+      const response = await fetch(healthUrl);
+      const body = await response.text();
+      console.log(body);
+      if (!response.ok) {
+        failures.push(`proxy health returned HTTP ${response.status}`);
+      }
+      return;
+    } catch (error) {
+      lastError = error;
+      await Bun.sleep(100);
+    }
   }
+
+  failures.push(`proxy health failed after retries: ${lastError}`);
 }
 
 function stripJsonComments(source: string): string {
