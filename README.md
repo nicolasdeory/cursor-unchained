@@ -106,6 +106,18 @@ To leave Zed settings untouched:
 bun run install:zed-macos -- --no-settings
 ```
 
+To check for upstream Zed changes, rebase the patched branch, and reinstall when the update succeeds:
+
+```bash
+bun run update:zed-macos
+```
+
+The updater refuses to run when the Zed checkout has local changes or is detached. To preview the update without changing anything:
+
+```bash
+bun run update:zed-macos -- --dry-run
+```
+
 If Xcode reports a missing Metal Toolchain during incremental release builds, run:
 
 ```bash
