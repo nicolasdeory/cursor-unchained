@@ -18,6 +18,7 @@ const captureInput = process.env.ZED_CURSOR_PROXY_CAPTURE_INPUT ?? "captures/zed
 const skipLiveProbe = process.env.ZED_CURSOR_VERIFY_SKIP_LIVE === "1";
 
 const failures: string[] = [];
+const warnings: string[] = [];
 
 function run(name: string, cmd: string[], options: { quiet?: boolean } = {}): CommandResult {
   const result = Bun.spawnSync({
@@ -144,6 +145,75 @@ function checkCommand(result: CommandResult) {
   }
 }
 
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const [, payload] = token.split(".");
+  if (!payload) {
+    return null;
+  }
+
+  try {
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function checkCursorCredentials() {
+  console.log(`\n== cursor credentials ==`);
+
+  const token = process.env.CURSOR_BEARER_TOKEN ?? "";
+  const sessionId = process.env.X_SESSION_ID ?? "";
+  const clientVersion = process.env.X_CURSOR_CLIENT_VERSION ?? "";
+  const requestId = process.env.X_REQUEST_ID ?? "";
+
+  if (!fs.existsSync(path.join(process.cwd(), ".env"))) {
+    warnings.push("cursor-unchained/.env is missing; relying only on the current process environment");
+  }
+
+  if (!token) {
+    failures.push("CURSOR_BEARER_TOKEN is missing");
+  } else {
+    console.log("CURSOR_BEARER_TOKEN: present");
+    const payload = decodeJwtPayload(token);
+    const exp = typeof payload?.exp === "number" ? payload.exp : null;
+    if (exp == null) {
+      warnings.push("CURSOR_BEARER_TOKEN is not a decodable JWT; expiry could not be checked");
+    } else {
+      const expiresAt = new Date(exp * 1000);
+      const msUntilExpiry = expiresAt.getTime() - Date.now();
+      const daysUntilExpiry = msUntilExpiry / 86_400_000;
+      console.log(`token_expires_at: ${expiresAt.toISOString()}`);
+      if (msUntilExpiry <= 0) {
+        failures.push("CURSOR_BEARER_TOKEN is expired");
+      } else if (daysUntilExpiry < 7) {
+        warnings.push(
+          `CURSOR_BEARER_TOKEN expires soon: ${expiresAt.toISOString()} (${daysUntilExpiry.toFixed(1)} days)`,
+        );
+      }
+    }
+  }
+
+  if (!sessionId) {
+    failures.push("X_SESSION_ID is missing");
+  } else {
+    console.log("X_SESSION_ID: present");
+  }
+
+  if (!clientVersion) {
+    failures.push("X_CURSOR_CLIENT_VERSION is missing");
+  } else {
+    console.log(`X_CURSOR_CLIENT_VERSION: ${clientVersion}`);
+  }
+
+  if (!requestId) {
+    warnings.push("X_REQUEST_ID is missing; proxy will generate request IDs automatically");
+  } else {
+    console.log("X_REQUEST_ID: present");
+  }
+}
+
 function parseLastJsonObject(output: string): any | null {
   const trimmed = output.trim();
   for (let index = 0; index < trimmed.length; index++) {
@@ -206,6 +276,7 @@ function checkLiveProbe() {
 
 readSettings();
 checkAppBundle();
+checkCursorCredentials();
 await checkProxyHealth();
 checkCommand(run("unit tests", ["bun", "run", "test:zed-proxy"]));
 checkCaptureEval();
@@ -213,10 +284,16 @@ checkLiveProbe();
 
 console.log(`\n== summary ==`);
 if (failures.length > 0) {
+  for (const warning of warnings) {
+    console.error(`WARN: ${warning}`);
+  }
   for (const failure of failures) {
     console.error(`FAIL: ${failure}`);
   }
   process.exit(1);
 }
 
+for (const warning of warnings) {
+  console.warn(`WARN: ${warning}`);
+}
 console.log("Zed Cursor Tab verification passed.");
