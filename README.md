@@ -88,7 +88,7 @@ git -C ../zed switch cursor-tab-external-provider
 bun run install:zed-macos
 ```
 
-The installer builds the patched Zed release binary, copies the existing Zed Preview app bundle so the normal icon and metadata are preserved, installs it as:
+The installer builds the patched Zed release binary, copies the existing Zed Preview app bundle so the normal icon and metadata are preserved, backs up and updates `~/.config/zed/settings.json`, and installs the app as:
 
 ```text
 /Applications/Zed Preview Cursor Tab.app
@@ -98,6 +98,12 @@ The app wrapper starts the local proxy on launch if it is not already running, t
 
 ```bash
 bun run install:zed-macos -- --zed-repo /path/to/zed --app "/Applications/Zed Cursor Tab.app"
+```
+
+To leave Zed settings untouched:
+
+```bash
+bun run install:zed-macos -- --no-settings
 ```
 
 If Xcode reports a missing Metal Toolchain during incremental release builds, run:

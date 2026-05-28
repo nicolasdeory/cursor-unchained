@@ -7,6 +7,8 @@ SOURCE_APP="${SOURCE_APP:-/Applications/Zed Preview.app}"
 APP="${APP:-/Applications/Zed Preview Cursor Tab.app}"
 BACKUP="${BACKUP:-/Applications/Zed Preview Stock.app}"
 PORT="${ZED_CURSOR_PROXY_PORT:-17878}"
+SETTINGS_PATH="${ZED_SETTINGS_PATH:-${HOME}/.config/zed/settings.json}"
+CONFIGURE_SETTINGS=1
 
 usage() {
   cat <<'EOF'
@@ -17,11 +19,13 @@ Options:
   --source-app PATH     Existing Zed Preview.app to copy icon/bundle metadata from.
   --app PATH            Destination app bundle. Default: /Applications/Zed Preview Cursor Tab.app
   --backup PATH         Backup path for stock Zed Preview.app.
+  --settings-path PATH  Zed settings file to update. Default: ~/.config/zed/settings.json
+  --no-settings         Do not update Zed settings.
   --no-build            Skip cargo build and install already-built release binaries.
   -h, --help            Show this help.
 
 Environment:
-  ZED_REPO, SOURCE_APP, APP, BACKUP, ZED_CURSOR_PROXY_PORT, CARGO_INCREMENTAL
+  ZED_REPO, SOURCE_APP, APP, BACKUP, ZED_SETTINGS_PATH, ZED_CURSOR_PROXY_PORT, CARGO_INCREMENTAL
 EOF
 }
 
@@ -43,6 +47,14 @@ while [[ $# -gt 0 ]]; do
     --backup)
       BACKUP="$2"
       shift 2
+      ;;
+    --settings-path)
+      SETTINGS_PATH="$2"
+      shift 2
+      ;;
+    --no-settings)
+      CONFIGURE_SETTINGS=0
+      shift
       ;;
     --no-build)
       BUILD=0
@@ -76,6 +88,90 @@ if [[ -z "${BUN}" || ! -x "${BUN}" ]]; then
   echo "Cannot find bun. Install Bun first." >&2
   exit 1
 fi
+
+configure_zed_settings() {
+  local predict_url settings_dir backup_path
+  predict_url="http://127.0.0.1:${PORT}/predict"
+  settings_dir="$(dirname "${SETTINGS_PATH}")"
+
+  mkdir -p "${settings_dir}"
+  if [[ -f "${SETTINGS_PATH}" ]]; then
+    backup_path="${SETTINGS_PATH}.backup.$(date +%Y%m%d%H%M%S)"
+    cp "${SETTINGS_PATH}" "${backup_path}"
+    echo "Backed up Zed settings to ${backup_path}"
+  fi
+
+  SETTINGS_PATH="${SETTINGS_PATH}" PREDICT_URL="${predict_url}" "${BUN}" --eval '
+const fs = require("node:fs");
+const path = process.env.SETTINGS_PATH;
+const predictUrl = process.env.PREDICT_URL;
+
+function stripJsonComments(source) {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+      output += char;
+      continue;
+    }
+    if (char === "/" && next === "/") {
+      while (index < source.length && source[index] !== "\n") {
+        index++;
+      }
+      output += "\n";
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      index += 2;
+      while (index < source.length && !(source[index] === "*" && source[index + 1] === "/")) {
+        index++;
+      }
+      index++;
+      continue;
+    }
+    output += char;
+  }
+  return output;
+}
+
+function parseSettings(source) {
+  const trimmed = source.trim();
+  if (!trimmed) {
+    return {};
+  }
+  const json = stripJsonComments(trimmed).replace(/,\s*([}\]])/g, "$1");
+  return JSON.parse(json);
+}
+
+let settings = {};
+if (fs.existsSync(path)) {
+  settings = parseSettings(fs.readFileSync(path, "utf8"));
+}
+
+settings.edit_predictions ??= {};
+settings.edit_predictions.provider = "external";
+settings.edit_predictions.external ??= {};
+settings.edit_predictions.external.api_url = predictUrl;
+
+fs.writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
+'
+  echo "Configured Zed edit predictions to use ${predict_url}"
+}
 
 if [[ "${BUILD}" == "1" ]]; then
   INCREMENTAL="${CARGO_INCREMENTAL:-1}"
@@ -175,6 +271,10 @@ if /usr/bin/codesign --force --deep --sign - "${APP}" >/dev/null 2>&1; then
   echo "Ad-hoc signed ${APP}"
 else
   echo "Warning: codesign failed; macOS may ask before launching the patched app." >&2
+fi
+
+if [[ "${CONFIGURE_SETTINGS}" == "1" ]]; then
+  configure_zed_settings
 fi
 
 echo "Installed patched Zed Preview at ${APP}"
