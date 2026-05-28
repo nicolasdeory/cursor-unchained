@@ -10,7 +10,7 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"test:zed-proxy": "bun test scripts/zedEditNormalizer.test.ts",
+		"test:zed-proxy": "bun test scripts/zedEditNormalizer.test.ts scripts/cursorPayloadUtils.test.ts scripts/evalZedProxyCaptures.test.ts",
 		"probe:zed-proxy": "bun run scripts/probeZedProxy.ts",
 		"eval:zed-proxy": "bun run scripts/evalZedProxyCaptures.ts",
 		"install:zed-macos": "bash scripts/macos/install-zed-cursor-tab.sh",

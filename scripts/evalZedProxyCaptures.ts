@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { normalizeCursorEdits, type ZedRequestForEdit } from "./zedEditNormalizer";
+import {
+  deletedBlockReintroductionPenalty,
+  normalizeCursorEdits,
+  type ZedRequestForEdit,
+} from "./zedEditNormalizer";
 
 type Position = { line: number; column: number };
 type Edit = { range: { start: Position; end: Position }; text: string };
@@ -125,6 +129,8 @@ let normalizedShown = 0;
 let changed = 0;
 let multiEdit = 0;
 let duplicateRisk = 0;
+let deletedReintroductionRisk = 0;
+let capturedDeletedReintroductionRisk = 0;
 let punctuationOnly = 0;
 let replayMismatch = 0;
 const latencies: number[] = [];
@@ -144,6 +150,12 @@ for (const record of records) {
 
   const edits = normalizeCursorEdits(request, result);
   const capturedEdits = record.zedResponse?.edits ?? [];
+  if (
+    capturedEdits.length > 0 &&
+    deletedBlockReintroductionPenalty(request, applyEdits(request.contents, capturedEdits)) > 0
+  ) {
+    capturedDeletedReintroductionRisk++;
+  }
   if (edits.length !== capturedEdits.length) {
     replayMismatch++;
   } else if (
@@ -171,6 +183,15 @@ for (const record of records) {
   if (next !== request.contents) {
     changed++;
   }
+  if (deletedBlockReintroductionPenalty(request, next) > 0) {
+    deletedReintroductionRisk++;
+    riskyExamples.push({
+      path: record.relativePath,
+      cursor: request.cursor,
+      deletedReintroduction: true,
+      textPreview: edits.map((edit) => edit.text).join("\n---\n").slice(0, 180),
+    });
+  }
   const duplicates = newDuplicateDeclarations(request.contents, next);
   if (duplicates.length > 0) {
     duplicateRisk++;
@@ -192,6 +213,8 @@ const summary = {
   rawShowRate: records.length ? rawNonEmpty / records.length : 0,
   normalizedShowRate: records.length ? normalizedShown / records.length : 0,
   duplicateRisk,
+  deletedReintroductionRisk,
+  capturedDeletedReintroductionRisk,
   punctuationOnly,
   replayMismatch,
   sourceCounts: Object.fromEntries(sourceCounts),

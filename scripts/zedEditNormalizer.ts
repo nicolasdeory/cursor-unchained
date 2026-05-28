@@ -520,7 +520,7 @@ function containsTrimmedLineSequence(contents: string, block: string[]): boolean
   return false;
 }
 
-function deletedBlockReintroductionPenalty(
+export function deletedBlockReintroductionPenalty(
   request: ZedRequestForEdit,
   newContents: string,
 ): number {
