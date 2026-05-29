@@ -376,10 +376,6 @@ EOF
 resolve_metal_toolchain_bin_dir() {
   local metal_bin
 
-  if xcrun -sdk macosx metal -v >/dev/null 2>&1; then
-    return 0
-  fi
-
   metal_bin="$(find /var/run/com.apple.security.cryptexd/mnt \
     -path '*/Metal.xctoolchain/usr/bin/metal' \
     -type f \
@@ -387,8 +383,20 @@ resolve_metal_toolchain_bin_dir() {
     -print \
     2>/dev/null | head -n 1 || true)"
 
-  if [[ -n "${metal_bin}" && -x "${metal_bin}" ]] && "${metal_bin}" -v >/dev/null 2>&1; then
-    dirname "${metal_bin}"
+  if [[ -n "${metal_bin}" && -x "${metal_bin}" ]]; then
+    local metal_bin_dir
+    metal_bin_dir="$(dirname "${metal_bin}")"
+    if "${metal_bin_dir}/metal" -v >/dev/null 2>&1 && "${metal_bin_dir}/metallib" -v >/dev/null 2>&1; then
+      echo "${metal_bin_dir}"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+xcrun_metal_tools_available() {
+  if xcrun -sdk macosx metal -v >/dev/null 2>&1 && xcrun -sdk macosx metallib -v >/dev/null 2>&1; then
     return 0
   fi
 
@@ -421,10 +429,10 @@ if [[ "${BUILD}" == "1" ]]; then
 
   INCREMENTAL="${CARGO_INCREMENTAL:-1}"
   METAL_XCRUN_WRAPPER_DIR=""
-  if ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then
+  if ! xcrun_metal_tools_available; then
     echo "Metal Toolchain was not resolved by xcrun; clearing xcrun cache and retrying."
     xcrun -k >/dev/null 2>&1 || true
-    if ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then
+    if ! xcrun_metal_tools_available; then
       METAL_BIN_DIR="$(resolve_metal_toolchain_bin_dir || true)"
       if [[ -n "${METAL_BIN_DIR}" ]]; then
         METAL_XCRUN_WRAPPER_DIR="$(install_xcrun_metal_wrapper "${METAL_BIN_DIR}")"
