@@ -5,11 +5,15 @@ import fs from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { defaultStreamCppPayload } from "../src/lib/constants";
 import { normalizeFileDiffHistories } from "./cursorPayloadUtils";
+import {
+  extensionForPath,
+  recordCppAcceptFate,
+  type PredictionAcceptMetadata,
+} from "./cursorAcceptTelemetry";
 import { toZedResponse } from "./zedExternalProtocol";
 import {
   CURSOR_BEARER_TOKEN,
   X_CURSOR_CLIENT_VERSION,
-  X_REQUEST_ID,
   X_SESSION_ID,
 } from "../src/lib/env";
 
@@ -33,6 +37,7 @@ type ZedRequest = {
 type CursorResult = {
   status?: number;
   source?: "exact" | "legacy";
+  requestId?: string;
   bindingId?: string;
   text: string;
   rangeToReplace?: {
@@ -61,7 +66,9 @@ const CAPTURE = process.env.ZED_CURSOR_PROXY_CAPTURE === "1";
 const CAPTURE_DIR =
   process.env.ZED_CURSOR_PROXY_CAPTURE_DIR ?? "captures/zed-cursor-tab";
 const SUPPORTS_CPT = process.env.ZED_CURSOR_PROXY_CPT !== "0";
+const ACCEPT_TELEMETRY = process.env.ZED_CURSOR_PROXY_ACCEPT_TELEMETRY !== "0";
 const previousContentsByPath = new Map<string, string>();
+const acceptMetadataByPredictionId = new Map<string, PredictionAcceptMetadata>();
 const requestRoot = await protobuf.load("./protobuf/streamCppRequest.proto");
 const Request = requestRoot.lookupType("aiserver.v1.StreamCppRequest");
 const responseRoot = await protobuf.load("./protobuf/streamCppResponse.proto");
@@ -660,7 +667,8 @@ async function streamCppPayload(
   envelope.writeUInt32BE(protoBuffer.length, 1);
   protoBuffer.copy(envelope, 5);
 
-  const requestId = X_REQUEST_ID || crypto.randomUUID();
+  const requestId =
+    process.env.ZED_CURSOR_PROXY_FIXED_REQUEST_ID ?? crypto.randomUUID();
   const options: https.RequestOptions = {
     hostname: "us-only.gcpp.cursor.sh",
     port: 443,
@@ -688,6 +696,7 @@ async function streamCppPayload(
       const result: CursorResult = {
         status: res.statusCode,
         source,
+        requestId,
         text: "",
         rangeToReplace: null,
         cursorPredictionTarget: null,
@@ -848,16 +857,44 @@ Bun.serve({
 
     if (req.method === "POST" && url.pathname === "/accept") {
       const body = (await req.json().catch(() => ({}))) as { id?: string };
+      let upstreamAccept: "sent" | "disabled" | "missing-metadata" | "missing-id" | "failed" =
+        "missing-id";
+      let upstreamAcceptError: string | undefined;
+      if (!ACCEPT_TELEMETRY) {
+        upstreamAccept = "disabled";
+      } else if (body.id) {
+        const metadata = acceptMetadataByPredictionId.get(body.id);
+        if (metadata) {
+          try {
+            await recordCppAcceptFate(metadata);
+            acceptMetadataByPredictionId.delete(body.id);
+            upstreamAccept = "sent";
+          } catch (error) {
+            upstreamAccept = "failed";
+            upstreamAcceptError = error instanceof Error ? error.message : String(error);
+          }
+        } else {
+          upstreamAccept = "missing-metadata";
+        }
+      }
       appendCapture({
         schema: 1,
         capturedAt: new Date().toISOString(),
         type: "accept",
         id: body.id,
+        upstreamAccept,
+        upstreamAcceptError,
       });
       if (DEBUG) {
-        console.error(JSON.stringify({ accepted: body.id ? "prediction" : "missing-id" }));
+        console.error(
+          JSON.stringify({
+            accepted: body.id ? "prediction" : "missing-id",
+            upstreamAccept,
+            upstreamAcceptError,
+          }),
+        );
       }
-      return json({ ok: true });
+      return json({ ok: true, upstream_accept: upstreamAccept });
     }
 
     if (req.method !== "POST" || url.pathname !== "/predict") {
@@ -872,6 +909,16 @@ Bun.serve({
         debug: DEBUG,
         debugPath: relativePath(zedRequest),
       });
+      if (
+        cursorResult.requestId &&
+        zedResponse.id_source === "cursor" &&
+        (zedResponse.edits.length > 0 || zedResponse.jump)
+      ) {
+        acceptMetadataByPredictionId.set(zedResponse.id, {
+          requestId: cursorResult.requestId,
+          extension: extensionForPath(relativePath(zedRequest)),
+        });
+      }
       const latencyMs = Math.round(performance.now() - startedAt);
       appendCapture({
         schema: 1,

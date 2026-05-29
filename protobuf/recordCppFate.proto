@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package aiserver.v1;
+
+message RecordCppFateRequest {
+  string request_id = 1;
+  float performance_now_time = 2;
+  CppFate fate = 3;
+  string extension = 4;
+}
+
+enum CppFate {
+  CPP_FATE_UNSPECIFIED = 0;
+  CPP_FATE_ACCEPT = 1;
+  CPP_FATE_REJECT = 2;
+  CPP_FATE_PARTIAL_ACCEPT = 3;
+}
+
+message RecordCppFateResponse {}
