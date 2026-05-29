@@ -522,6 +522,21 @@ WRAPPER="${MACOS}/zed"
 REAL_ZED="${MACOS}/zed-bin"
 METADATA="${RESOURCES}/zed-cursor-tab.json"
 
+if [[ -d "${APP}" ]]; then
+  running_pids="$(pgrep -f "${REAL_ZED}" 2>/dev/null || true)"
+  if [[ -n "${running_pids}" ]]; then
+    cat >&2 <<EOF
+${APP} is currently running as:
+${running_pids}
+
+Leaving the app bundle unchanged so your active Zed session is not disrupted.
+Close Zed and rerun:
+  bun run install:zed-macos -- --no-build
+EOF
+    exit 1
+  fi
+fi
+
 echo "Installing release Zed binary into ${APP}"
 cp "${RELEASE_ZED}" "${REAL_ZED}"
 cp "${RELEASE_CLI}" "${MACOS}/cli"

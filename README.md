@@ -142,6 +142,14 @@ To verify the local app, Zed settings, Cursor credentials, proxy health, capture
 bun run verify:zed-macos
 ```
 
+The installer will not overwrite `/Applications/Zed Preview Cursor Tab.app`
+while that app is running. If a build succeeds but install is skipped, close Zed
+and rerun:
+
+```bash
+bun run install:zed-macos -- --no-build
+```
+
 If Xcode reports a missing Metal Toolchain during incremental release builds, run:
 
 ```bash
