@@ -373,22 +373,78 @@ EOF
   fi
 }
 
+resolve_metal_toolchain_bin_dir() {
+  local metal_bin
+
+  if xcrun -sdk macosx metal -v >/dev/null 2>&1; then
+    return 0
+  fi
+
+  metal_bin="$(find /var/run/com.apple.security.cryptexd/mnt \
+    -path '*/Metal.xctoolchain/usr/bin/metal' \
+    -type f \
+    -perm +111 \
+    -print \
+    2>/dev/null | head -n 1 || true)"
+
+  if [[ -n "${metal_bin}" && -x "${metal_bin}" ]] && "${metal_bin}" -v >/dev/null 2>&1; then
+    dirname "${metal_bin}"
+    return 0
+  fi
+
+  return 1
+}
+
+install_xcrun_metal_wrapper() {
+  local metal_bin_dir="$1"
+  local wrapper_dir
+
+  wrapper_dir="$(mktemp -d "${TMPDIR:-/tmp}/zed-metal-xcrun.XXXXXX")"
+  cat >"${wrapper_dir}/xcrun" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "\${1:-}" == "-sdk" && "\${2:-}" == "macosx" && ( "\${3:-}" == "metal" || "\${3:-}" == "metallib" ) ]]; then
+  tool="\${3}"
+  shift 3
+  exec "${metal_bin_dir}/\${tool}" "\$@"
+fi
+
+exec /usr/bin/xcrun "\$@"
+EOF
+  chmod +x "${wrapper_dir}/xcrun"
+  echo "${wrapper_dir}"
+}
+
 if [[ "${BUILD}" == "1" ]]; then
   preflight_build_disk
 
   INCREMENTAL="${CARGO_INCREMENTAL:-1}"
-  if [[ "${INCREMENTAL}" != "0" ]] && ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then
+  METAL_XCRUN_WRAPPER_DIR=""
+  if ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then
     echo "Metal Toolchain was not resolved by xcrun; clearing xcrun cache and retrying."
     xcrun -k >/dev/null 2>&1 || true
     if ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then
-      echo "Metal Toolchain is unavailable for Xcode's macOS SDK; using non-incremental release build."
-      echo "For faster future builds, run: xcodebuild -downloadComponent MetalToolchain && xcrun -k"
-      INCREMENTAL=0
+      METAL_BIN_DIR="$(resolve_metal_toolchain_bin_dir || true)"
+      if [[ -n "${METAL_BIN_DIR}" ]]; then
+        METAL_XCRUN_WRAPPER_DIR="$(install_xcrun_metal_wrapper "${METAL_BIN_DIR}")"
+        echo "Using direct Metal Toolchain at ${METAL_BIN_DIR} for this build."
+      else
+        echo "Metal Toolchain is unavailable for Xcode's macOS SDK."
+        echo "For faster future builds, run: xcodebuild -downloadComponent MetalToolchain && xcrun -k"
+        if [[ "${INCREMENTAL}" != "0" ]]; then
+          echo "Using non-incremental release build."
+          INCREMENTAL=0
+        fi
+      fi
     fi
   fi
 
   (
     cd "${ZED_REPO}"
+    if [[ -n "${METAL_XCRUN_WRAPPER_DIR}" ]]; then
+      export PATH="${METAL_XCRUN_WRAPPER_DIR}:${PATH}"
+    fi
     CXXFLAGS="${CXXFLAGS:--stdlib=libc++}" \
       ZED_RELEASE_CHANNEL=preview \
       CARGO_INCREMENTAL="${INCREMENTAL}" \
