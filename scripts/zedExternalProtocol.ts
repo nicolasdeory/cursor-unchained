@@ -34,6 +34,7 @@ export type CursorResultForProtocol = {
 
 export type ZedExternalResponse = {
   id: string;
+  id_source: "cursor" | "synthetic";
   edits: Array<{
     range: {
       start: ZedPosition;
@@ -58,6 +59,7 @@ export function toZedResponse(
   } = {},
 ): ZedExternalResponse {
   const id = result.bindingId || crypto.randomUUID();
+  const idSource = result.bindingId ? "cursor" : "synthetic";
   const edits: ZedExternalResponse["edits"] = [];
 
   if (options.debug) {
@@ -110,7 +112,7 @@ export function toZedResponse(
     }
   }
 
-  const response: ZedExternalResponse = { id, edits };
+  const response: ZedExternalResponse = { id, id_source: idSource, edits };
   if (result.cursorPredictionTarget?.relativePath) {
     response.jump = {
       path: result.cursorPredictionTarget.relativePath,

@@ -17,6 +17,7 @@ describe("toZedResponse", () => {
     });
 
     expect(response.id).toBe("cursor-binding-123");
+    expect(response.id_source).toBe("cursor");
     expect(response.edits.length).toBeGreaterThan(0);
   });
 
@@ -34,6 +35,7 @@ describe("toZedResponse", () => {
 
     expect(response).toEqual({
       id: "jump-binding-123",
+      id_source: "cursor",
       edits: [],
       jump: {
         path: "src/other.ts",
@@ -54,5 +56,14 @@ describe("toZedResponse", () => {
     });
 
     expect(response.jump?.position).toEqual({ line: 0, column: 0 });
+  });
+
+  test("marks generated ids as synthetic when Cursor does not send a binding id", () => {
+    const response = toZedResponse(request("let value = \n", 0, 12), {
+      text: "1",
+    });
+
+    expect(response.id).toBeTruthy();
+    expect(response.id_source).toBe("synthetic");
   });
 });

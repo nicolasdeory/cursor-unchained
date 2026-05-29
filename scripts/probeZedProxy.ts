@@ -120,7 +120,13 @@ async function runCase(
     body: JSON.stringify(body),
   });
   const elapsedMs = performance.now() - started;
-  const json = (await response.json()) as { edits?: Edit[]; error?: string };
+  const json = (await response.json()) as {
+    id?: string;
+    id_source?: "cursor" | "synthetic";
+    edits?: Edit[];
+    jump?: unknown;
+    error?: string;
+  };
   if (!response.ok) {
     throw new Error(`${name}: HTTP ${response.status}: ${json.error ?? "unknown error"}`);
   }
@@ -132,6 +138,8 @@ async function runCase(
     latencyMs: Math.round(elapsedMs),
     edits: edits.length,
     changed: next !== contents,
+    idSource: json.id_source ?? "missing",
+    hasJump: Boolean(json.jump),
     selectedItemIds: declarationCount(next, "selectedItemIds"),
     pendingUpdates: declarationCount(next, "pendingUpdates"),
     removedItemIds: declarationCount(next, "removedItemIds"),
@@ -216,6 +224,9 @@ for (const result of results) {
   if (result.latencyMs > maxLatencyMs) {
     failures.push(`${result.name}: latency ${result.latencyMs}ms > ${maxLatencyMs}ms`);
   }
+  if ((result.changed || result.hasJump) && result.idSource !== "cursor") {
+    failures.push(`${result.name}: shown prediction id source is ${result.idSource}`);
+  }
 }
 
 const duplicateCollection = results.find((result) => result.name === "duplicate-sensitive-selection");
@@ -239,6 +250,9 @@ console.log(
     summary: {
       cases: results.length,
       changed: results.filter((result) => result.changed).length,
+      cursorBackedIds: results.filter(
+        (result) => (result.changed || result.hasJump) && result.idSource === "cursor",
+      ).length,
       maxLatencyMs: Math.max(...results.map((result) => result.latencyMs)),
       failures,
     },

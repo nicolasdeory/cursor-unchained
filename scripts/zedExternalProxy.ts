@@ -60,6 +60,7 @@ const DEBUG = process.env.ZED_CURSOR_PROXY_DEBUG === "1";
 const CAPTURE = process.env.ZED_CURSOR_PROXY_CAPTURE === "1";
 const CAPTURE_DIR =
   process.env.ZED_CURSOR_PROXY_CAPTURE_DIR ?? "captures/zed-cursor-tab";
+const SUPPORTS_CPT = process.env.ZED_CURSOR_PROXY_CPT !== "0";
 const previousContentsByPath = new Map<string, string>();
 const requestRoot = await protobuf.load("./protobuf/streamCppRequest.proto");
 const Request = requestRoot.lookupType("aiserver.v1.StreamCppRequest");
@@ -182,8 +183,8 @@ function buildExactCursorPayload(request: ZedRequest, exactPayload: Record<strin
   payload.timeSinceRequestStart = 0;
   payload.timeAtRequestSend = now;
   payload.clientTimezoneOffset = new Date().getTimezoneOffset();
-  payload.supportsCpt = process.env.ZED_CURSOR_PROXY_CPT === "1";
-  payload.supportsCrlfCpt = process.env.ZED_CURSOR_PROXY_CPT === "1";
+  payload.supportsCpt = SUPPORTS_CPT;
+  payload.supportsCrlfCpt = SUPPORTS_CPT;
   payload.enableMoreContext =
     process.env.ZED_CURSOR_PROXY_MORE_CONTEXT === "1" ||
     Boolean(payload.enableMoreContext);
@@ -216,8 +217,8 @@ function buildLegacyCursorPayload(request: ZedRequest) {
     lineEnding,
     fileVersion: Math.floor(now / 1000),
   };
-  payload.supportsCpt = process.env.ZED_CURSOR_PROXY_CPT === "1";
-  payload.supportsCrlfCpt = process.env.ZED_CURSOR_PROXY_CPT === "1";
+  payload.supportsCpt = SUPPORTS_CPT;
+  payload.supportsCrlfCpt = SUPPORTS_CPT;
   payload.enableMoreContext = process.env.ZED_CURSOR_PROXY_MORE_CONTEXT === "1";
   payload.fileDiffHistories = [
     {
