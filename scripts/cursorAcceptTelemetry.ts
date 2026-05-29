@@ -11,6 +11,14 @@ export type PredictionAcceptMetadata = {
   extension: string;
 };
 
+export type CppFate = "accept" | "reject" | "partial_accept";
+
+const CPP_FATE_NUMBER: Record<CppFate, number> = {
+  accept: 1,
+  reject: 2,
+  partial_accept: 3,
+};
+
 const CURSOR_CPP_FATE_HOST =
   process.env.CURSOR_CPP_FATE_HOST ?? "api2.cursor.sh";
 const root = await protobuf.load("./protobuf/recordCppFate.proto");
@@ -38,29 +46,45 @@ export function buildRecordCppAcceptFateEnvelope(
   metadata: PredictionAcceptMetadata,
   performanceNowTime = performance.now(),
 ) {
-  return connectEnvelope(buildRecordCppAcceptFateProto(metadata, performanceNowTime));
+  return connectEnvelope(buildRecordCppFateProto(metadata, "accept", performanceNowTime));
 }
 
 export function buildRecordCppAcceptFateProto(
   metadata: PredictionAcceptMetadata,
   performanceNowTime = performance.now(),
 ) {
+  return buildRecordCppFateProto(metadata, "accept", performanceNowTime);
+}
+
+export function buildRecordCppFateProto(
+  metadata: PredictionAcceptMetadata,
+  fate: CppFate,
+  performanceNowTime = performance.now(),
+) {
   const payload = RecordCppFateRequest.create({
     requestId: metadata.requestId,
     performanceNowTime,
-    fate: 1,
+    fate: CPP_FATE_NUMBER[fate],
     extension: metadata.extension,
   });
   return Buffer.from(RecordCppFateRequest.encode(payload).finish());
 }
 
 export async function recordCppAcceptFate(metadata: PredictionAcceptMetadata) {
+  return recordCppFate(metadata, "accept");
+}
+
+export async function recordCppRejectFate(metadata: PredictionAcceptMetadata) {
+  return recordCppFate(metadata, "reject");
+}
+
+async function recordCppFate(metadata: PredictionAcceptMetadata, fate: CppFate) {
   const token = CURSOR_BEARER_TOKEN;
   if (!token) {
     throw new Error("Missing CURSOR_BEARER_TOKEN in cursor-unchained/.env");
   }
 
-  const body = buildRecordCppAcceptFateProto(metadata);
+  const body = buildRecordCppFateProto(metadata, fate);
   const options: https.RequestOptions = {
     hostname: CURSOR_CPP_FATE_HOST,
     port: 443,

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildRecordCppAcceptFateEnvelope,
   buildRecordCppAcceptFateProto,
+  buildRecordCppFateProto,
   extensionForPath,
 } from "./cursorAcceptTelemetry";
 
@@ -38,5 +39,19 @@ describe("Cursor accept telemetry", () => {
 
     expect(raw.length).toBeGreaterThan(0);
     expect(raw[0]).not.toBe(0);
+  });
+
+  test("encodes distinct Cursor fate values", () => {
+    const metadata = {
+      requestId: "request-123",
+      extension: "ts",
+    };
+
+    expect(buildRecordCppFateProto(metadata, "accept", 12.5)).not.toEqual(
+      buildRecordCppFateProto(metadata, "reject", 12.5),
+    );
+    expect(buildRecordCppFateProto(metadata, "partial_accept", 12.5)).not.toEqual(
+      buildRecordCppFateProto(metadata, "reject", 12.5),
+    );
   });
 });

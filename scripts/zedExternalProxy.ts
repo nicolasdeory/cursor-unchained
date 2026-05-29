@@ -8,6 +8,7 @@ import { normalizeFileDiffHistories } from "./cursorPayloadUtils";
 import {
   extensionForPath,
   recordCppAcceptFate,
+  recordCppRejectFate,
   type PredictionAcceptMetadata,
 } from "./cursorAcceptTelemetry";
 import { toZedResponse } from "./zedExternalProtocol";
@@ -855,46 +856,57 @@ Bun.serve({
       return json({ ok: true });
     }
 
-    if (req.method === "POST" && url.pathname === "/accept") {
+    if (
+      req.method === "POST" &&
+      (url.pathname === "/accept" || url.pathname === "/reject")
+    ) {
       const body = (await req.json().catch(() => ({}))) as { id?: string };
-      let upstreamAccept: "sent" | "disabled" | "missing-metadata" | "missing-id" | "failed" =
+      const isAccept = url.pathname === "/accept";
+      let upstreamFate: "sent" | "disabled" | "missing-metadata" | "missing-id" | "failed" =
         "missing-id";
-      let upstreamAcceptError: string | undefined;
+      let upstreamFateError: string | undefined;
       if (!ACCEPT_TELEMETRY) {
-        upstreamAccept = "disabled";
+        upstreamFate = "disabled";
       } else if (body.id) {
         const metadata = acceptMetadataByPredictionId.get(body.id);
         if (metadata) {
           try {
-            await recordCppAcceptFate(metadata);
+            if (isAccept) {
+              await recordCppAcceptFate(metadata);
+            } else {
+              await recordCppRejectFate(metadata);
+            }
             acceptMetadataByPredictionId.delete(body.id);
-            upstreamAccept = "sent";
+            upstreamFate = "sent";
           } catch (error) {
-            upstreamAccept = "failed";
-            upstreamAcceptError = error instanceof Error ? error.message : String(error);
+            upstreamFate = "failed";
+            upstreamFateError = error instanceof Error ? error.message : String(error);
           }
         } else {
-          upstreamAccept = "missing-metadata";
+          upstreamFate = "missing-metadata";
         }
       }
       appendCapture({
         schema: 1,
         capturedAt: new Date().toISOString(),
-        type: "accept",
+        type: isAccept ? "accept" : "reject",
         id: body.id,
-        upstreamAccept,
-        upstreamAcceptError,
+        upstreamFate,
+        upstreamFateError,
       });
       if (DEBUG) {
         console.error(
           JSON.stringify({
-            accepted: body.id ? "prediction" : "missing-id",
-            upstreamAccept,
-            upstreamAcceptError,
+            [isAccept ? "accepted" : "rejected"]: body.id ? "prediction" : "missing-id",
+            upstreamFate,
+            upstreamFateError,
           }),
         );
       }
-      return json({ ok: true, upstream_accept: upstreamAccept });
+      return json({
+        ok: true,
+        [isAccept ? "upstream_accept" : "upstream_reject"]: upstreamFate,
+      });
     }
 
     if (req.method !== "POST" || url.pathname !== "/predict") {
