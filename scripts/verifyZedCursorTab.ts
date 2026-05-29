@@ -614,7 +614,7 @@ function checkLiveProbe() {
   const result = run("live probe", ["bun", "scripts/probeZedProxy.ts"], {
     env: {
       ZED_CURSOR_PROXY_PROBE_ITERATIONS:
-        process.env.ZED_CURSOR_PROXY_PROBE_ITERATIONS ?? "3",
+        process.env.ZED_CURSOR_PROXY_PROBE_ITERATIONS ?? "8",
       ZED_CURSOR_PROXY_MIN_AUTO_IMPORT_CHANGED:
         process.env.ZED_CURSOR_PROXY_MIN_AUTO_IMPORT_CHANGED ?? "1",
     },
