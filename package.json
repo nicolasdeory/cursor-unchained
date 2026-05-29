@@ -17,6 +17,7 @@
 		"verify:zed-macos": "bun run scripts/verifyZedCursorTab.ts",
 		"install:zed-macos": "bash scripts/macos/install-zed-cursor-tab.sh",
 		"install:zed-macos-when-closed": "bash scripts/macos/install-zed-cursor-tab.sh --no-build --wait-for-exit",
+		"finish:zed-macos-when-closed": "bash scripts/macos/install-zed-cursor-tab.sh --no-build --wait-for-exit && bun run verify:zed-macos",
 		"update:zed-macos": "bash scripts/macos/update-zed-cursor-tab.sh",
 		"status:zed-macos": "bash scripts/macos/status-zed-cursor-tab.sh",
 		"zed-proxy": "bun run scripts/zedExternalProxy.ts",

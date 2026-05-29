@@ -156,6 +156,12 @@ Or start the safe install first and let it wait until Zed quits:
 bun run install:zed-macos-when-closed
 ```
 
+To wait, install, and then run the full verification suite automatically:
+
+```bash
+bun run finish:zed-macos-when-closed
+```
+
 If Xcode reports a missing Metal Toolchain during incremental release builds, run:
 
 ```bash
