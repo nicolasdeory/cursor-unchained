@@ -46,6 +46,30 @@ describe("toZedResponse", () => {
     });
   });
 
+  test("prefers Cursor prediction targets over local text edits", () => {
+    const response = toZedResponse(request("export function main() {\n  return \n}\n", 1, 9), {
+      bindingId: "jump-binding-with-text",
+      text: "  return 1;\n",
+      cursorPredictionTarget: {
+        relativePath: "src/other.ts",
+        lineNumberOneIndexed: 3,
+        expectedContent: "export const target = 1;",
+      },
+    });
+
+    expect(response).toEqual({
+      id: "jump-binding-with-text",
+      id_source: "cursor",
+      edits: [],
+      jump: {
+        path: "src/other.ts",
+        expected_content: "export const target = 1;",
+        should_retrigger: undefined,
+        position: { line: 2, column: 0 },
+      },
+    });
+  });
+
   test("clamps malformed one-indexed jump lines to the start of the file", () => {
     const response = toZedResponse(request("export function main() {}\n"), {
       text: "",

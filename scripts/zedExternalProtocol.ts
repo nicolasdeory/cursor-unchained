@@ -61,6 +61,9 @@ export function toZedResponse(
   const id = result.bindingId || crypto.randomUUID();
   const idSource = result.bindingId ? "cursor" : "synthetic";
   const edits: ZedExternalResponse["edits"] = [];
+  const cursorPredictionTarget = result.cursorPredictionTarget?.relativePath
+    ? result.cursorPredictionTarget
+    : null;
 
   if (options.debug) {
     console.error(
@@ -79,7 +82,7 @@ export function toZedResponse(
     );
   }
 
-  if (result.text) {
+  if (result.text && !cursorPredictionTarget) {
     const normalizedEdits = normalizeCursorEdits(request, result);
     if (normalizedEdits.length > 0) {
       if (options.debug) {
@@ -113,13 +116,13 @@ export function toZedResponse(
   }
 
   const response: ZedExternalResponse = { id, id_source: idSource, edits };
-  if (result.cursorPredictionTarget?.relativePath) {
+  if (cursorPredictionTarget) {
     response.jump = {
-      path: result.cursorPredictionTarget.relativePath,
-      expected_content: result.cursorPredictionTarget.expectedContent,
-      should_retrigger: result.cursorPredictionTarget.shouldRetriggerCpp,
+      path: cursorPredictionTarget.relativePath,
+      expected_content: cursorPredictionTarget.expectedContent,
+      should_retrigger: cursorPredictionTarget.shouldRetriggerCpp,
       position: {
-        line: Math.max(0, result.cursorPredictionTarget.lineNumberOneIndexed - 1),
+        line: Math.max(0, cursorPredictionTarget.lineNumberOneIndexed - 1),
         column: 0,
       },
     };
