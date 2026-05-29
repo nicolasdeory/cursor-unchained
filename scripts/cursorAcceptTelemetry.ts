@@ -78,6 +78,10 @@ export async function recordCppRejectFate(metadata: PredictionAcceptMetadata) {
   return recordCppFate(metadata, "reject");
 }
 
+export async function recordCppPartialAcceptFate(metadata: PredictionAcceptMetadata) {
+  return recordCppFate(metadata, "partial_accept");
+}
+
 async function recordCppFate(metadata: PredictionAcceptMetadata, fate: CppFate) {
   const token = CURSOR_BEARER_TOKEN;
   if (!token) {

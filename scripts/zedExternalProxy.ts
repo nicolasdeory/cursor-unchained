@@ -8,6 +8,7 @@ import { normalizeFileDiffHistories } from "./cursorPayloadUtils";
 import {
   extensionForPath,
   recordCppAcceptFate,
+  recordCppPartialAcceptFate,
   recordCppRejectFate,
   type PredictionAcceptMetadata,
 } from "./cursorAcceptTelemetry";
@@ -858,10 +859,17 @@ Bun.serve({
 
     if (
       req.method === "POST" &&
-      (url.pathname === "/accept" || url.pathname === "/reject")
+      (url.pathname === "/accept" ||
+        url.pathname === "/reject" ||
+        url.pathname === "/partial_accept")
     ) {
       const body = (await req.json().catch(() => ({}))) as { id?: string };
-      const isAccept = url.pathname === "/accept";
+      const fate =
+        url.pathname === "/accept"
+          ? "accept"
+          : url.pathname === "/partial_accept"
+            ? "partial_accept"
+            : "reject";
       let upstreamFate: "sent" | "disabled" | "missing-metadata" | "missing-id" | "failed" =
         "missing-id";
       let upstreamFateError: string | undefined;
@@ -871,12 +879,15 @@ Bun.serve({
         const metadata = acceptMetadataByPredictionId.get(body.id);
         if (metadata) {
           try {
-            if (isAccept) {
+            if (fate === "accept") {
               await recordCppAcceptFate(metadata);
+              acceptMetadataByPredictionId.delete(body.id);
+            } else if (fate === "partial_accept") {
+              await recordCppPartialAcceptFate(metadata);
             } else {
               await recordCppRejectFate(metadata);
+              acceptMetadataByPredictionId.delete(body.id);
             }
-            acceptMetadataByPredictionId.delete(body.id);
             upstreamFate = "sent";
           } catch (error) {
             upstreamFate = "failed";
@@ -889,7 +900,7 @@ Bun.serve({
       appendCapture({
         schema: 1,
         capturedAt: new Date().toISOString(),
-        type: isAccept ? "accept" : "reject",
+        type: fate,
         id: body.id,
         upstreamFate,
         upstreamFateError,
@@ -897,7 +908,11 @@ Bun.serve({
       if (DEBUG) {
         console.error(
           JSON.stringify({
-            [isAccept ? "accepted" : "rejected"]: body.id ? "prediction" : "missing-id",
+            [fate === "accept"
+              ? "accepted"
+              : fate === "partial_accept"
+                ? "partialAccepted"
+                : "rejected"]: body.id ? "prediction" : "missing-id",
             upstreamFate,
             upstreamFateError,
           }),
@@ -905,7 +920,11 @@ Bun.serve({
       }
       return json({
         ok: true,
-        [isAccept ? "upstream_accept" : "upstream_reject"]: upstreamFate,
+        [fate === "accept"
+          ? "upstream_accept"
+          : fate === "partial_accept"
+            ? "upstream_partial_accept"
+            : "upstream_reject"]: upstreamFate,
       });
     }
 

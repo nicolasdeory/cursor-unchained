@@ -13,6 +13,7 @@ type CommandResult = {
 const proxyUrl = process.env.ZED_CURSOR_PROXY_URL ?? "http://127.0.0.1:17878/predict";
 const healthUrl = proxyUrl.replace(/\/predict$/, "/health");
 const acceptUrl = proxyUrl.replace(/\/predict$/, "/accept");
+const partialAcceptUrl = proxyUrl.replace(/\/predict$/, "/partial_accept");
 const settingsPath =
   process.env.ZED_SETTINGS_PATH ?? path.join(os.homedir(), ".config", "zed", "settings.json");
 const appPath = process.env.ZED_CURSOR_TAB_APP ?? "/Applications/Zed Preview Cursor Tab.app";
@@ -71,7 +72,7 @@ async function checkProxyHealth() {
 }
 
 async function checkProxyAccept() {
-  console.log(`\n== proxy accept ==`);
+  console.log(`\n== proxy fate endpoints ==`);
   try {
     const response = await fetch(acceptUrl, {
       method: "POST",
@@ -85,6 +86,21 @@ async function checkProxyAccept() {
     }
   } catch (error) {
     failures.push(`proxy accept failed: ${error}`);
+  }
+
+  try {
+    const response = await fetch(partialAcceptUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: `verify-partial-${Date.now()}` }),
+    });
+    const body = await response.text();
+    console.log(body);
+    if (!response.ok) {
+      failures.push(`proxy partial_accept returned HTTP ${response.status}`);
+    }
+  } catch (error) {
+    failures.push(`proxy partial_accept failed: ${error}`);
   }
 }
 
