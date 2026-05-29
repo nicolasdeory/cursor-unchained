@@ -12,6 +12,7 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test:zed-proxy": "bun test scripts/zedEditNormalizer.test.ts scripts/cursorPayloadUtils.test.ts scripts/evalZedProxyCaptures.test.ts scripts/zedExternalProtocol.test.ts",
 		"probe:zed-proxy": "bun run scripts/probeZedProxy.ts",
+		"benchmark:zed-proxy": "ZED_CURSOR_PROXY_PROBE_ITERATIONS=5 ZED_CURSOR_PROXY_MAX_LATENCY_MS=1200 bun run scripts/probeZedProxy.ts",
 		"eval:zed-proxy": "bun run scripts/evalZedProxyCaptures.ts",
 		"verify:zed-macos": "bun run scripts/verifyZedCursorTab.ts",
 		"install:zed-macos": "bash scripts/macos/install-zed-cursor-tab.sh",

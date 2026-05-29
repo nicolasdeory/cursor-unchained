@@ -99,6 +99,7 @@ async function runCase(
   cursor: Position,
   absolutePath = "/tmp/test.ts",
   extraCursorPayload: Record<string, unknown> = {},
+  iteration = 1,
 ) {
   const workspaceRoot = path.dirname(absolutePath);
   const relPath = path.basename(absolutePath);
@@ -135,6 +136,7 @@ async function runCase(
   const next = applyEdits(contents, edits);
   const result = {
     name,
+    iteration,
     latencyMs: Math.round(elapsedMs),
     edits: edits.length,
     changed: next !== contents,
@@ -196,16 +198,28 @@ const deletionDiff = [
   " return remainingItemIds;",
 ].join("\n");
 
-const results = [
-  await runCase("simple-return", simple, { line: 1, column: 9 }),
-  await runCase("duplicate-sensitive-collection", duplicateSensitive, { line: 4, column: 18 }),
-  await runCase("duplicate-sensitive-selection", duplicateSensitive, { line: 15, column: 0 }),
-  await runCase(
-    "deletion-sensitive",
-    deletionSensitive,
-    { line: 1, column: 4 },
-    "/tmp/test.ts",
-    {
+const cases = [
+  {
+    name: "simple-return",
+    contents: simple,
+    cursor: { line: 1, column: 9 },
+  },
+  {
+    name: "duplicate-sensitive-collection",
+    contents: duplicateSensitive,
+    cursor: { line: 4, column: 18 },
+  },
+  {
+    name: "duplicate-sensitive-selection",
+    contents: duplicateSensitive,
+    cursor: { line: 15, column: 0 },
+  },
+  {
+    name: "deletion-sensitive",
+    contents: deletionSensitive,
+    cursor: { line: 1, column: 4 },
+    absolutePath: "/tmp/test.ts",
+    extraCursorPayload: {
       diffHistory: [deletionDiff],
       fileDiffHistories: [
         {
@@ -215,10 +229,39 @@ const results = [
         },
       ],
     },
-  ),
+  },
 ];
 
+function percentile(values: number[], p: number) {
+  if (values.length === 0) {
+    return null;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p))];
+}
+
+const iterations = Math.max(
+  1,
+  Number(process.env.ZED_CURSOR_PROXY_PROBE_ITERATIONS ?? "1"),
+);
+const results = [];
+for (let iteration = 1; iteration <= iterations; iteration++) {
+  for (const testCase of cases) {
+    results.push(
+      await runCase(
+        testCase.name,
+        testCase.contents,
+        testCase.cursor,
+        testCase.absolutePath,
+        testCase.extraCursorPayload,
+        iteration,
+      ),
+    );
+  }
+}
+
 const maxLatencyMs = Number(process.env.ZED_CURSOR_PROXY_MAX_LATENCY_MS ?? "2500");
+const minChanged = Number(process.env.ZED_CURSOR_PROXY_MIN_CHANGED ?? String(iterations));
 const failures: string[] = [];
 for (const result of results) {
   if (result.latencyMs > maxLatencyMs) {
@@ -229,31 +272,49 @@ for (const result of results) {
   }
 }
 
-const duplicateCollection = results.find((result) => result.name === "duplicate-sensitive-selection");
-if (duplicateCollection && duplicateCollection.selectedItemIds > 1) {
+const duplicateCollections = results.filter(
+  (result) => result.name === "duplicate-sensitive-selection",
+);
+if (duplicateCollections.some((result) => result.selectedItemIds > 1)) {
   failures.push("duplicate-sensitive-selection duplicated selectedItemIds");
 }
-if (duplicateCollection && duplicateCollection.pendingUpdates > 1) {
+if (duplicateCollections.some((result) => result.pendingUpdates > 1)) {
   failures.push("duplicate-sensitive-selection duplicated pendingUpdates");
 }
 
-const deletionCollection = results.find((result) => result.name === "deletion-sensitive");
-if (deletionCollection && deletionCollection.removedItemIds > 0) {
+const deletionCollections = results.filter((result) => result.name === "deletion-sensitive");
+if (deletionCollections.some((result) => result.removedItemIds > 0)) {
   failures.push("deletion-sensitive reintroduced removedItemIds");
 }
-if (deletionCollection && deletionCollection.removedItemCount > 0) {
+if (deletionCollections.some((result) => result.removedItemCount > 0)) {
   failures.push("deletion-sensitive reintroduced removedItemCount");
 }
 
+const changed = results.filter((result) => result.changed).length;
+const cursorBackedIds = results.filter(
+  (result) => (result.changed || result.hasJump) && result.idSource === "cursor",
+).length;
+if (changed < minChanged) {
+  failures.push(`changed predictions ${changed} < ${minChanged}`);
+}
+
+const latencies = results.map((result) => result.latencyMs);
 console.log(
   JSON.stringify({
     summary: {
-      cases: results.length,
-      changed: results.filter((result) => result.changed).length,
-      cursorBackedIds: results.filter(
-        (result) => (result.changed || result.hasJump) && result.idSource === "cursor",
-      ).length,
-      maxLatencyMs: Math.max(...results.map((result) => result.latencyMs)),
+      iterations,
+      cases: cases.length,
+      requests: results.length,
+      changed,
+      cursorBackedIds,
+      latencyMs: {
+        min: Math.min(...latencies),
+        p50: percentile(latencies, 0.5),
+        p90: percentile(latencies, 0.9),
+        p95: percentile(latencies, 0.95),
+        max: Math.max(...latencies),
+      },
+      maxLatencyMs: Math.max(...latencies),
       failures,
     },
   }),
