@@ -161,6 +161,7 @@ async function runCase(
     firstEditRange: edits[0]?.range ?? null,
     firstEditTextLength: edits[0]?.text.length ?? 0,
     firstEditPreview: edits[0]?.text.slice(0, 160) ?? "",
+    insertedImport: /\bimport\s+.*\bnullthrows\b/.test(next),
   };
   console.log(JSON.stringify(result));
   return result;
@@ -213,6 +214,16 @@ const deletionDiff = [
 const autoImportDiagnostic = [
   "export function run(foo: string) {",
   "  return nullthrows(foo);",
+  "}",
+  "",
+].join("\n");
+
+const nullthrowsHelper = [
+  "export function nullthrows<T>(value: T | null | undefined, message = 'Unexpected null'): T {",
+  "  if (value == null) {",
+  "    throw new Error(message);",
+  "  }",
+  "  return value;",
   "}",
   "",
 ].join("\n");
@@ -273,6 +284,33 @@ const cases = [
       lspSuggestedItems: {
         suggestions: [{ label: "nullthrows" }],
       },
+      additionalFiles: [
+        {
+          relativeWorkspacePath: "utils/nullthrows.ts",
+          isOpen: true,
+          visibleRangeContent: [nullthrowsHelper],
+          startLineNumberOneIndexed: [1],
+          visibleRanges: [
+            {
+              startLineNumber: 1,
+              endLineNumberInclusive: nullthrowsHelper.split("\n").length,
+            },
+          ],
+        },
+      ],
+      codeResults: [
+        {
+          codeBlock: {
+            relativeWorkspacePath: "utils/nullthrows.ts",
+            range: {
+              startPosition: { line: 0, column: 0 },
+              endPosition: { line: nullthrowsHelper.split("\n").length, column: 0 },
+            },
+            contents: nullthrowsHelper,
+          },
+          score: 0.95,
+        },
+      ],
     },
   },
 ];
@@ -335,6 +373,19 @@ if (deletionCollections.some((result) => result.removedItemCount > 0)) {
   failures.push("deletion-sensitive reintroduced removedItemCount");
 }
 
+const autoImportCollections = results.filter(
+  (result) => result.name === "auto-import-diagnostic-shape",
+);
+const autoImportChanged = autoImportCollections.filter(
+  (result) => result.changed && result.insertedImport,
+).length;
+const minAutoImportChanged = Number(process.env.ZED_CURSOR_PROXY_MIN_AUTO_IMPORT_CHANGED ?? "0");
+if (autoImportChanged < minAutoImportChanged) {
+  failures.push(
+    `auto-import changed predictions ${autoImportChanged} < ${minAutoImportChanged}`,
+  );
+}
+
 const changed = results.filter((result) => result.changed).length;
 const cursorBackedIds = results.filter(
   (result) => (result.changed || result.hasJump) && result.idSource === "cursor",
@@ -351,6 +402,7 @@ console.log(
       cases: cases.length,
       requests: results.length,
       changed,
+      autoImportChanged,
       cursorBackedIds,
       latencyMs: {
         min: Math.min(...latencies),

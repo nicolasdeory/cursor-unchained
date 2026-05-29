@@ -10,6 +10,11 @@ type CommandResult = {
   stderr: string;
 };
 
+type CommandOptions = {
+  quiet?: boolean;
+  env?: Record<string, string>;
+};
+
 const proxyUrl = process.env.ZED_CURSOR_PROXY_URL ?? "http://127.0.0.1:17878/predict";
 const healthUrl = proxyUrl.replace(/\/predict$/, "/health");
 const acceptUrl = proxyUrl.replace(/\/predict$/, "/accept");
@@ -28,13 +33,13 @@ const strictDailyDriver = process.env.ZED_CURSOR_VERIFY_STRICT_DAILY_DRIVER === 
 const failures: string[] = [];
 const warnings: string[] = [];
 
-function run(name: string, cmd: string[], options: { quiet?: boolean } = {}): CommandResult {
+function run(name: string, cmd: string[], options: CommandOptions = {}): CommandResult {
   const result = Bun.spawnSync({
     cmd,
     cwd: process.cwd(),
     stdout: "pipe",
     stderr: "pipe",
-    env: process.env,
+    env: { ...process.env, ...options.env },
   });
   const stdout = new TextDecoder().decode(result.stdout);
   const stderr = new TextDecoder().decode(result.stderr);
@@ -601,7 +606,14 @@ function checkLiveProbe() {
     return;
   }
 
-  const result = run("live probe", ["bun", "scripts/probeZedProxy.ts"]);
+  const result = run("live probe", ["bun", "scripts/probeZedProxy.ts"], {
+    env: {
+      ZED_CURSOR_PROXY_PROBE_ITERATIONS:
+        process.env.ZED_CURSOR_PROXY_PROBE_ITERATIONS ?? "3",
+      ZED_CURSOR_PROXY_MIN_AUTO_IMPORT_CHANGED:
+        process.env.ZED_CURSOR_PROXY_MIN_AUTO_IMPORT_CHANGED ?? "1",
+    },
+  });
   checkCommand(result);
   const summaryLine = result.stdout
     .trim()
