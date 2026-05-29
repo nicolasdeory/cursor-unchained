@@ -149,6 +149,12 @@ xcodebuild -downloadComponent MetalToolchain
 xcrun -k
 ```
 
+On recent Xcode builds, the download may succeed while the default Xcode
+toolchain still resolves `metal` to a stub. The macOS installer detects the
+downloaded `Metal.xctoolchain`, reads its `ToolchainInfo.plist`, and builds with
+`TOOLCHAINS=<Metal toolchain id>` so incremental release builds can use the
+downloaded `metal` and `metallib` tools.
+
 ### Notes
 
 This is not a full Cursor editor clone. It maps Zed edit-prediction context into Cursor Tab requests, normalizes Cursor's response back into Zed edits, and supports multi-file context when Zed provides it. Cursor account credentials are read from a local `.env`; do not commit that file.

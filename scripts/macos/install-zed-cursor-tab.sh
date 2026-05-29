@@ -395,6 +395,27 @@ resolve_metal_toolchain_bin_dir() {
   return 1
 }
 
+resolve_metal_toolchain_id() {
+  local metal_bin_dir="$1"
+  local toolchain_dir
+  local info_plist
+  local identifier
+
+  toolchain_dir="$(cd "${metal_bin_dir}/../.." && pwd)"
+  info_plist="${toolchain_dir}/ToolchainInfo.plist"
+  if [[ ! -f "${info_plist}" ]]; then
+    return 1
+  fi
+
+  identifier="$(plutil -extract Identifier raw -o - "${info_plist}" 2>/dev/null || true)"
+  if [[ -n "${identifier}" ]]; then
+    echo "${identifier}"
+    return 0
+  fi
+
+  return 1
+}
+
 xcrun_metal_tools_available() {
   if xcrun -sdk macosx metal -v >/dev/null 2>&1 && xcrun -sdk macosx metallib -v >/dev/null 2>&1; then
     return 0
@@ -429,14 +450,21 @@ if [[ "${BUILD}" == "1" ]]; then
 
   INCREMENTAL="${CARGO_INCREMENTAL:-1}"
   METAL_XCRUN_WRAPPER_DIR=""
+  METAL_TOOLCHAINS=""
   if ! xcrun_metal_tools_available; then
     echo "Metal Toolchain was not resolved by xcrun; clearing xcrun cache and retrying."
     xcrun -k >/dev/null 2>&1 || true
     if ! xcrun_metal_tools_available; then
       METAL_BIN_DIR="$(resolve_metal_toolchain_bin_dir || true)"
       if [[ -n "${METAL_BIN_DIR}" ]]; then
-        METAL_XCRUN_WRAPPER_DIR="$(install_xcrun_metal_wrapper "${METAL_BIN_DIR}")"
-        echo "Using direct Metal Toolchain at ${METAL_BIN_DIR} for this build."
+        METAL_TOOLCHAIN_ID="$(resolve_metal_toolchain_id "${METAL_BIN_DIR}" || true)"
+        if [[ -n "${METAL_TOOLCHAIN_ID}" ]] && TOOLCHAINS="${METAL_TOOLCHAIN_ID}" xcrun_metal_tools_available; then
+          METAL_TOOLCHAINS="${METAL_TOOLCHAIN_ID}"
+          echo "Using Metal Toolchain ${METAL_TOOLCHAINS} for this build."
+        else
+          METAL_XCRUN_WRAPPER_DIR="$(install_xcrun_metal_wrapper "${METAL_BIN_DIR}")"
+          echo "Using direct Metal Toolchain at ${METAL_BIN_DIR} for this build."
+        fi
       else
         echo "Metal Toolchain is unavailable for Xcode's macOS SDK."
         echo "For faster future builds, run: xcodebuild -downloadComponent MetalToolchain"
@@ -452,6 +480,9 @@ if [[ "${BUILD}" == "1" ]]; then
     cd "${ZED_REPO}"
     if [[ -n "${METAL_XCRUN_WRAPPER_DIR}" ]]; then
       export PATH="${METAL_XCRUN_WRAPPER_DIR}:${PATH}"
+    fi
+    if [[ -n "${METAL_TOOLCHAINS}" ]]; then
+      export TOOLCHAINS="${METAL_TOOLCHAINS}"
     fi
     CXXFLAGS="${CXXFLAGS:--stdlib=libc++}" \
       ZED_RELEASE_CHANNEL=preview \
