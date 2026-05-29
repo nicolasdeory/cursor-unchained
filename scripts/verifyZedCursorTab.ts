@@ -600,6 +600,11 @@ function checkCaptureEval() {
   }
 }
 
+function checkMockJumpProbe() {
+  const result = run("mock jump probe", ["bun", "test", "scripts/zedExternalProxyMock.test.ts"]);
+  checkCommand(result);
+}
+
 function checkLiveProbe() {
   if (skipLiveProbe) {
     console.log("\n== live probe ==\nskipped via ZED_CURSOR_VERIFY_SKIP_LIVE=1");
@@ -642,6 +647,7 @@ checkDailyDriverIntegration();
 await checkProxyHealth();
 await checkProxyAccept();
 checkCommand(run("unit tests", ["bun", "run", "test:zed-proxy"]));
+checkMockJumpProbe();
 checkCaptureEval();
 checkLiveProbe();
 

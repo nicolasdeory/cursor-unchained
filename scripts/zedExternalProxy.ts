@@ -818,6 +818,14 @@ async function streamCppPayload(
 }
 
 async function streamCpp(request: ZedRequest): Promise<CursorResult> {
+  if (process.env.ZED_CURSOR_PROXY_MOCK_RESULT) {
+    return {
+      status: 200,
+      source: "exact",
+      ...JSON.parse(process.env.ZED_CURSOR_PROXY_MOCK_RESULT),
+    };
+  }
+
   const exactPayload = request.cursorRequest ?? request.cursor_request;
   const exactResult = await streamCppPayload(
     request,
