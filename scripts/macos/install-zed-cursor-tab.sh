@@ -431,7 +431,7 @@ if [[ "${BUILD}" == "1" ]]; then
         echo "Using direct Metal Toolchain at ${METAL_BIN_DIR} for this build."
       else
         echo "Metal Toolchain is unavailable for Xcode's macOS SDK."
-        echo "For faster future builds, run: xcodebuild -downloadComponent MetalToolchain && xcrun -k"
+        echo "For faster future builds, run: xcodebuild -downloadComponent MetalToolchain"
         if [[ "${INCREMENTAL}" != "0" ]]; then
           echo "Using non-incremental release build."
           INCREMENTAL=0
