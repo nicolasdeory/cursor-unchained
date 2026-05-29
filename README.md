@@ -150,6 +150,12 @@ and rerun:
 bun run install:zed-macos -- --no-build
 ```
 
+Or start the safe install first and let it wait until Zed quits:
+
+```bash
+bun run install:zed-macos-when-closed
+```
+
 If Xcode reports a missing Metal Toolchain during incremental release builds, run:
 
 ```bash

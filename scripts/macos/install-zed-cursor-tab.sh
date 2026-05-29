@@ -14,6 +14,7 @@ CONFIGURE_DOCK=1
 CONFIGURE_APPTIVATE=1
 MIN_FREE_GB="${ZED_CURSOR_MIN_FREE_GB:-25}"
 CLEAN_BUILD_CACHE=0
+WAIT_FOR_EXIT=0
 
 usage() {
   cat <<'EOF'
@@ -31,6 +32,8 @@ Options:
   --no-dock             Do not add the patched app to the Dock.
   --no-apptivate        Do not retarget Apptivate Ctrl-2 to the patched app.
   --no-build            Skip cargo build and install already-built release binaries.
+  --wait-for-exit       If the patched app is running, wait until it exits instead
+                        of failing immediately.
   --clean-build-cache   Remove regenerable Zed debug/incremental build artifacts before building.
   --min-free-gb GB      Minimum free disk space required before building. Default: 25.
   -h, --help            Show this help.
@@ -82,6 +85,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-build)
       BUILD=0
+      shift
+      ;;
+    --wait-for-exit)
+      WAIT_FOR_EXIT=1
       shift
       ;;
     --clean-build-cache)
@@ -525,15 +532,27 @@ METADATA="${RESOURCES}/zed-cursor-tab.json"
 if [[ -d "${APP}" ]]; then
   running_pids="$(pgrep -f "${REAL_ZED}" 2>/dev/null || true)"
   if [[ -n "${running_pids}" ]]; then
-    cat >&2 <<EOF
+    if [[ "${WAIT_FOR_EXIT}" == "1" ]]; then
+      echo "${APP} is currently running as:"
+      echo "${running_pids}"
+      echo "Waiting for Zed to quit before installing..."
+      while [[ -n "$(pgrep -f "${REAL_ZED}" 2>/dev/null || true)" ]]; do
+        sleep 2
+      done
+    else
+      cat >&2 <<EOF
 ${APP} is currently running as:
 ${running_pids}
 
 Leaving the app bundle unchanged so your active Zed session is not disrupted.
 Close Zed and rerun:
   bun run install:zed-macos -- --no-build
+
+Or wait automatically:
+  bun run install:zed-macos -- --no-build --wait-for-exit
 EOF
-    exit 1
+      exit 1
+    fi
   fi
 fi
 
