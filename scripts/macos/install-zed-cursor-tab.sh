@@ -531,7 +531,7 @@ if ! /usr/bin/curl -fsS "\${HEALTH_URL}" >/dev/null 2>&1; then
   <array>
     <string>\${BUN}</string>
     <string>run</string>
-    <string>zed-proxy</string>
+    <string>scripts/zedExternalProxy.ts</string>
   </array>
   <key>WorkingDirectory</key>
   <string>\${PROXY_ROOT}</string>
@@ -556,7 +556,7 @@ PLIST
     if ! /bin/launchctl kickstart -k "\${LAUNCHD_TARGET}/zed-cursor-tab-proxy" >/dev/null 2>&1; then
       (
         cd "\${PROXY_ROOT}"
-        exec "\${BUN}" run zed-proxy
+        exec "\${BUN}" run scripts/zedExternalProxy.ts
       ) >>"\${LOG_FILE}" 2>&1 &
     fi
 
@@ -610,7 +610,7 @@ cat >"${PLIST}" <<PLIST
   <array>
     <string>${BUN}</string>
     <string>run</string>
-    <string>zed-proxy</string>
+    <string>scripts/zedExternalProxy.ts</string>
   </array>
   <key>WorkingDirectory</key>
   <string>${PROXY_ROOT}</string>
