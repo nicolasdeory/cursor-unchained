@@ -50,7 +50,7 @@ function exactPayload(
   extra: Record<string, unknown> = {},
 ) {
   const lineEnding = contents.includes("\r\n") ? "\r\n" : "\n";
-  return {
+  const payload = {
     currentFile: {
       relativeWorkspacePath: relPath,
       contents,
@@ -89,7 +89,19 @@ function exactPayload(
     supportsCpt: false,
     supportsCrlfCpt: false,
     codeResults: [],
+  };
+  const extraCurrentFile =
+    typeof extra.currentFile === "object" && extra.currentFile !== null
+      ? (extra.currentFile as Record<string, unknown>)
+      : {};
+
+  return {
+    ...payload,
     ...extra,
+    currentFile: {
+      ...payload.currentFile,
+      ...extraCurrentFile,
+    },
   };
 }
 
@@ -198,6 +210,13 @@ const deletionDiff = [
   " return remainingItemIds;",
 ].join("\n");
 
+const autoImportDiagnostic = [
+  "export function run(foo: string) {",
+  "  return nullthrows(foo);",
+  "}",
+  "",
+].join("\n");
+
 const cases = [
   {
     name: "simple-return",
@@ -228,6 +247,32 @@ const cases = [
           diffHistoryTimestamps: [Date.now()],
         },
       ],
+    },
+  },
+  {
+    name: "auto-import-diagnostic-shape",
+    contents: autoImportDiagnostic,
+    cursor: { line: 1, column: 25 },
+    absolutePath: "/tmp/test.ts",
+    extraCursorPayload: {
+      currentFile: {
+        diagnostics: [
+          {
+            message: "Cannot find name 'nullthrows'.",
+            range: {
+              startLine: 1,
+              startColumn: 9,
+              endLine: 1,
+              endColumn: 19,
+            },
+            severity: 1,
+            relatedInformation: [],
+          },
+        ],
+      },
+      lspSuggestedItems: {
+        suggestions: [{ label: "nullthrows" }],
+      },
     },
   },
 ];

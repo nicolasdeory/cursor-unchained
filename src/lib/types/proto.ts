@@ -31,7 +31,12 @@ export interface Selection {
 
 export type DataFrame = {};
 
-export type Diagnostic = {};
+export interface Diagnostic {
+  message: string;
+  range?: Selection;
+  severity?: Severity;
+  relatedInformation: RelatedInformation[];
+}
 
 export type TopChunk = {};
 
@@ -75,9 +80,7 @@ export interface LinterErrors {
 
 export interface RelatedInformation {
   message: string;
-  relativeWorkspacePath: string;
-  relevantLines: string[];
-  startLine: number;
+  range?: Selection;
 }
 
 export interface FileDiffHistory {
@@ -129,6 +132,10 @@ export enum DbProvider {
 
 export enum Severity {
   UNSPECIFIED = 0,
+  ERROR = 1,
+  WARNING = 2,
+  INFORMATION = 3,
+  HINT = 4,
 }
 
 export interface RefreshTabContextRequest {
@@ -182,7 +189,9 @@ export type LspContext = {};
 
 export type FilesyncUpdate = {};
 
-export type LspSuggestion = {};
+export interface LspSuggestion {
+  label: string;
+}
 
 export interface LspSuggestedItems {
   suggestions: LspSuggestion[];

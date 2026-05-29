@@ -285,6 +285,13 @@ function lineAt(contents: string, line: number): string {
   return contents.split("\n")[line] ?? "";
 }
 
+function firstMeaningfulLine(contents: string): string | null {
+  return contents
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length >= 8) ?? null;
+}
+
 function trimmedNonEmptyLines(text: string): string[] {
   return text
     .split("\n")
@@ -714,6 +721,59 @@ function lineReplacementCandidates(
   return candidates;
 }
 
+function documentPrefixFragmentCandidates(
+  request: ZedRequestForEdit,
+  text: string,
+): Candidate[] {
+  const candidates: Candidate[] = [];
+  const anchorLine = firstMeaningfulLine(request.contents);
+  const cursorOffset = offsetForPosition(request.contents, request.cursor);
+  const suffixAtCursor = request.contents.slice(cursorOffset);
+
+  if (!anchorLine || !suffixAtCursor) {
+    return candidates;
+  }
+
+  for (const fragment of normalizeCandidateText(text)) {
+    const fragmentLines = fragment.split("\n");
+    const anchorIndex = fragmentLines.findIndex((line) => line.trim() === anchorLine);
+    if (anchorIndex < 0 || anchorIndex > 8) {
+      continue;
+    }
+
+    const beforeAnchorLooksLikePreamble = fragmentLines
+      .slice(0, anchorIndex)
+      .every((line) => {
+        const trimmed = line.trim();
+        return (
+          trimmed.length === 0 ||
+          trimmed.startsWith("import ") ||
+          trimmed.startsWith("export ") ||
+          trimmed.startsWith("const ") && trimmed.includes("require(") ||
+          trimmed.startsWith("//") ||
+          trimmed.startsWith("/*") ||
+          trimmed.startsWith("*")
+        );
+      });
+    if (!beforeAnchorLooksLikePreamble) {
+      continue;
+    }
+
+    const newContents = mergeWithExistingSuffix(fragment, suffixAtCursor);
+    const candidate = scoreCandidate(request, {
+      newContents,
+      reason: "document-prefix-fragment",
+      startLine: 0,
+      endLineExclusive: Math.max(request.cursor.line + 1, lineCount(fragment)),
+    });
+    if (candidate) {
+      candidates.push(candidate);
+    }
+  }
+
+  return candidates;
+}
+
 function bestCandidate(candidates: Candidate[]): Candidate | null {
   return candidates.sort((left, right) => left.score - right.score)[0] ?? null;
 }
@@ -788,6 +848,7 @@ function cursorEditCandidates(
   }
 
   candidates.push(...lineReplacementCandidates(request, result.text));
+  candidates.push(...documentPrefixFragmentCandidates(request, result.text));
 
   return { directEdit: null, candidates };
 }

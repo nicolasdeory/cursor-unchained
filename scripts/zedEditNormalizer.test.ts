@@ -209,4 +209,37 @@ describe("normalizeCursorEdit", () => {
     expect(edits.length).toBeGreaterThan(1);
     expect(applyEdits(contents, edits)).toBe(predicted);
   });
+
+  test("accepts Cursor document-prefix fragments that add imports", () => {
+    const contents = [
+      "export function run(foo: string) {",
+      "  return nullthrows(foo);",
+      "}",
+      "",
+    ].join("\n");
+    const cursorText = [
+      "",
+      'import { nullthrows } from "./utils/nullthrows";',
+      "",
+      "export function run(foo: string) {",
+      '  return nullthrows(foo, "foo is required");',
+    ].join("\n");
+
+    const edits = normalizeCursorEdits(request(contents, 1, 25), {
+      text: cursorText,
+      rangeToReplace: null,
+    });
+
+    expect(edits.length).toBeGreaterThan(0);
+    expect(applyEdits(contents, edits)).toBe(
+      [
+        'import { nullthrows } from "./utils/nullthrows";',
+        "",
+        "export function run(foo: string) {",
+        '  return nullthrows(foo, "foo is required");',
+        "}",
+        "",
+      ].join("\n"),
+    );
+  });
 });

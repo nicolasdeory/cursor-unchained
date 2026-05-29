@@ -56,7 +56,14 @@ message CurrentFileInfo {
 }
 
 message DataFrame {}
-message Diagnostic {}
+
+message Diagnostic {
+  string message = 1;
+  Selection range = 2;
+  Severity severity = 3;
+  repeated RelatedInformation related_information = 4;
+}
+
 message TopChunk {}
 message Cell {}
 
@@ -89,9 +96,7 @@ message Selection {
 
 message RelatedInformation {
   string message = 1;
-  string relative_workspace_path = 2;
-  repeated string relevant_lines = 3;
-  int32 start_line = 4;
+  Selection range = 2;
 }
 
 message FileDiffHistory {
@@ -132,7 +137,9 @@ message LspSuggestedItems {
   repeated LspSuggestion suggestions = 1;
 }
 
-message LspSuggestion {}
+message LspSuggestion {
+  string label = 1;
+}
 
 message CodeResult {
   CodeBlock code_block = 1;
@@ -164,4 +171,8 @@ enum ControlToken {
 
 enum Severity {
   SEVERITY_UNSPECIFIED = 0;
+  SEVERITY_ERROR = 1;
+  SEVERITY_WARNING = 2;
+  SEVERITY_INFORMATION = 3;
+  SEVERITY_HINT = 4;
 }
