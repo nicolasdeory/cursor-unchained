@@ -242,4 +242,29 @@ describe("normalizeCursorEdit", () => {
       ].join("\n"),
     );
   });
+
+  test("drops Cursor ranges that clobber unrelated code after the cursor", () => {
+    const contents = [
+      "export const FLAGS = [",
+      "  {",
+      "    name: 'nested_bom_breakdowns',",
+      "    description: 'keep me',",
+      "    tenantSlugs: ['intuitive_surgical'] satisfies string[],",
+      "  },",
+      "];",
+      "",
+    ].join("\n");
+
+    const edits = normalizeCursorEdits(request(contents, 1, 4), {
+      text: "const __zedProbe = nullthrows(import.meta.env.ZED_PROBE);",
+      rangeToReplace: {
+        startLine: 1,
+        startColumn: 4,
+        endLine: 3,
+        endColumn: 16,
+      },
+    });
+
+    expect(edits).toEqual([]);
+  });
 });

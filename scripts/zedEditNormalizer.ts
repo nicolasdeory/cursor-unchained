@@ -554,6 +554,57 @@ function adjacentDuplicatePenalty(text: string): number {
   return penalty;
 }
 
+function meaningfulExistingLine(line: string): string | null {
+  const trimmed = line.trim();
+  if (trimmed.length < 8) {
+    return null;
+  }
+  if (/^[{}()[\],;:.]+$/.test(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
+function declarationNameFromLine(line: string): string | null {
+  return (
+    line
+      .trim()
+      .match(/^(?:export\s+)?(?:const|let|var|function|class|interface|type)\s+([A-Za-z_$][\w$]*)/)?.[1] ??
+    null
+  );
+}
+
+function destructiveExistingCodePenalty(
+  request: ZedRequestForEdit,
+  edit: NormalizedEdit,
+  oldText: string,
+): number {
+  const replacement = edit.text;
+  let penalty = 0;
+
+  for (const [index, line] of oldText.split("\n").entries()) {
+    const oldLineNumber = edit.range.start.line + index;
+    if (oldLineNumber <= request.cursor.line) {
+      continue;
+    }
+
+    const meaningfulLine = meaningfulExistingLine(line);
+    if (!meaningfulLine) {
+      continue;
+    }
+
+    if (!replacement.includes(meaningfulLine)) {
+      const declarationName = declarationNameFromLine(meaningfulLine);
+      if (declarationName && declarationNames(replacement).has(declarationName)) {
+        continue;
+      }
+      penalty += 1200;
+    }
+  }
+
+  return penalty;
+}
+
 function windowOverlapScore(oldWindow: string, candidateText: string): number {
   const oldLines = new Set(trimmedNonEmptyLines(oldWindow));
   let score = 0;
@@ -643,7 +694,8 @@ function scoreCandidate(
     windowOverlapScore(oldWindow, candidateText) * 8 +
     duplicateDeclarationPenalty(request.contents, candidate.newContents) +
     deletedBlockReintroductionPenalty(request, candidate.newContents) +
-    adjacentDuplicatePenalty(candidateText);
+    adjacentDuplicatePenalty(candidateText) +
+    destructiveExistingCodePenalty(request, edit, oldText);
 
   for (const name of oldTextDeclarations) {
     if (!candidateDeclarations.has(name)) {
