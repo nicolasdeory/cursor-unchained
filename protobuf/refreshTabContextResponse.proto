@@ -13,15 +13,20 @@ message RefreshTabContextResponse {
 
 message CodeResult {
   CodeBlock code_block = 1;
-  double score = 2;
+  float score = 2;
 }
 
 message CodeBlock {
   string relative_workspace_path = 1;
-  Range range = 2;
-  string contents = 3;
-  Signatures signatures = 4;
-  repeated DetailedLine detailed_lines = 5;
+  optional string file_contents = 2;
+  Range range = 3;
+  string contents = 4;
+  Signatures signatures = 5;
+  optional string override_contents = 6;
+  optional string original_contents = 7;
+  repeated DetailedLine detailed_lines = 8;
+  optional int32 file_contents_length = 9;
+  FileGit file_git_context = 10;
 }
 
 message Range {
@@ -35,11 +40,22 @@ message Position {
 }
 
 message Signatures {
-  repeated SignatureRange ranges = 1;
+  repeated Range ranges = 1;
 }
 
-// Placeholder - actual structure unknown from JSON (was empty array)
-message SignatureRange {}
+message DetailedLine {
+  string text = 1;
+  float line_number = 2;
+  bool is_signature = 3;
+}
 
-// Placeholder - actual structure unknown from JSON (was empty array)
-message DetailedLine {}
+message GitCommit {
+  string commit = 1;
+  string author = 2;
+  string date = 3;
+  string message = 4;
+}
+
+message FileGit {
+  repeated GitCommit commits = 1;
+}

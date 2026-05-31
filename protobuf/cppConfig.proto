@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package aiserver.v1;
+
+message CppConfigRequest {
+  optional bool is_nightly = 1;
+  string model = 2;
+  optional bool supports_cpt = 3;
+}
+
+message CppConfigResponse {
+  optional int32 above_radius = 1;
+  optional int32 below_radius = 2;
+  optional bool is_on = 5;
+  optional bool is_ghost_text = 6;
+  optional bool should_let_user_enable_cpp_even_if_not_pro = 7;
+  repeated int32 heuristics = 8;
+  repeated string exclude_recently_viewed_files_patterns = 9;
+  bool enable_rvf_tracking = 10;
+  int32 global_debounce_duration_millis = 11;
+  int32 client_debounce_duration_millis = 12;
+  string cpp_url = 13;
+  bool use_whitespace_diff_history = 14;
+  ImportPredictionConfig import_prediction_config = 15;
+  bool enable_filesync_debounce_skipping = 16;
+  float check_filesync_hash_percent = 17;
+  string geo_cpp_backend_url = 18;
+  RecentlyRejectedEditThresholds recently_rejected_edit_thresholds = 19;
+  bool is_fused_cursor_prediction_model = 20;
+  bool include_unchanged_lines = 21;
+  bool should_fetch_rvf_text = 22;
+  optional int32 max_number_of_cleared_suggestions_since_last_accept = 23;
+  SuggestionHintConfig suggestion_hint_config = 24;
+  bool allows_tab_chunks = 25;
+  optional int32 tab_context_refresh_debounce_ms = 26;
+  optional int32 tab_context_refresh_editor_change_debounce_ms = 27;
+}
+
+message ImportPredictionConfig {
+  bool is_disabled_by_backend = 1;
+  bool should_turn_on_automatically = 2;
+  bool python_enabled = 3;
+}
+
+message RecentlyRejectedEditThresholds {
+  int32 hard_reject_threshold = 1;
+  int32 soft_reject_threshold = 2;
+}
+
+message SuggestionHintConfig {
+  repeated string enabled_for_path_extensions = 1;
+  repeated string important_lsp_extensions = 2;
+}

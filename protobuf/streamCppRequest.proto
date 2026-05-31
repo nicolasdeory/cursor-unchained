@@ -143,13 +143,20 @@ message LspSuggestion {
 
 message CodeResult {
   CodeBlock code_block = 1;
-  double score = 2;
+  float score = 2;
 }
 
 message CodeBlock {
   string relative_workspace_path = 1;
-  Range range = 2;
-  string contents = 3;
+  optional string file_contents = 2;
+  Range range = 3;
+  string contents = 4;
+  Signatures signatures = 5;
+  optional string override_contents = 6;
+  optional string original_contents = 7;
+  repeated DetailedLine detailed_lines = 8;
+  optional int32 file_contents_length = 9;
+  FileGit file_git_context = 10;
 }
 
 message Range {
@@ -160,6 +167,27 @@ message Range {
 message Position {
   int32 line = 1;
   int32 column = 2;
+}
+
+message Signatures {
+  repeated Range ranges = 1;
+}
+
+message DetailedLine {
+  string text = 1;
+  float line_number = 2;
+  bool is_signature = 3;
+}
+
+message GitCommit {
+  string commit = 1;
+  string author = 2;
+  string date = 3;
+  string message = 4;
+}
+
+message FileGit {
+  repeated GitCommit commits = 1;
 }
 
 enum ControlToken {
