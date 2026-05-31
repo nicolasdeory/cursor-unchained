@@ -40,6 +40,7 @@ type Candidate = {
   score: number;
   startLine: number;
   endLineExclusive: number;
+  trustedCursorRange?: NormalizedEdit;
 };
 
 function offsetForPosition(contents: string, position: ZedPosition): number {
@@ -717,6 +718,46 @@ function scoreCandidate(
   return { ...candidate, score };
 }
 
+function trustedCursorRangeEdit(
+  request: ZedRequestForEdit,
+  range: ZedRange,
+  text: string,
+): NormalizedEdit | null {
+  if (!isValidRange(range)) {
+    return null;
+  }
+
+  const startOffset = offsetForPosition(request.contents, range.start);
+  const endOffset = offsetForPosition(request.contents, range.end);
+  if (startOffset > endOffset) {
+    return null;
+  }
+
+  const oldText = request.contents.slice(startOffset, endOffset);
+  const edit: NormalizedEdit = { range, text, reason: "cursor-range-trusted" };
+
+  if (
+    destructiveExistingCodePenalty(request, edit, oldText) > 0 ||
+    deletedBlockReintroductionPenalty(
+      request,
+      applyNormalizedEdits(request.contents, [edit]),
+    ) > 0
+  ) {
+    return null;
+  }
+
+  const rangeTouchesCursor =
+    range.start.line <= request.cursor.line && range.end.line >= request.cursor.line;
+  const singleLineOrAdjacent =
+    range.start.line === range.end.line ||
+    range.end.line <= request.cursor.line + 1;
+  if (!rangeTouchesCursor || !singleLineOrAdjacent) {
+    return null;
+  }
+
+  return edit.text.length > 0 || startOffset !== endOffset ? edit : null;
+}
+
 function candidateFromFullText(
   request: ZedRequestForEdit,
   text: string,
@@ -869,6 +910,17 @@ function cursorEditCandidates(
         column: result.rangeToReplace.endColumn,
       },
     };
+    const trustedEdit = trustedCursorRangeEdit(request, range, result.text);
+    if (trustedEdit) {
+      candidates.push({
+        newContents: applyNormalizedEdits(request.contents, [trustedEdit]),
+        reason: trustedEdit.reason,
+        score: -100,
+        startLine: range.start.line,
+        endLineExclusive: range.end.line + 1,
+        trustedCursorRange: trustedEdit,
+      });
+    }
     if (isValidRange(range)) {
       const startOffset = offsetForPosition(request.contents, range.start);
       const endOffset = offsetForPosition(request.contents, range.end);
@@ -957,6 +1009,9 @@ export function normalizeCursorEdits(
   const selected = bestCandidate(candidates);
   if (!selected || selected.score >= 450) {
     return [];
+  }
+  if (selected.trustedCursorRange) {
+    return [selected.trustedCursorRange];
   }
 
   const edit = minimalDocumentEdit(request.contents, selected.newContents, selected.reason);

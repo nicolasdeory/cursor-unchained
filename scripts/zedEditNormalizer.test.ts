@@ -267,4 +267,40 @@ describe("normalizeCursorEdit", () => {
 
     expect(edits).toEqual([]);
   });
+
+  test("accepts trusted Cursor same-line replacements in the middle of a file", () => {
+    const contents = [
+      "function add(a: number, b: number) {",
+      "  return a",
+      "}",
+      "",
+      "function keep() {",
+      "  return true;",
+      "}",
+      "",
+    ].join("\n");
+
+    const edits = normalizeCursorEdits(request(contents, 1, 10), {
+      text: "a + b;",
+      rangeToReplace: {
+        startLine: 1,
+        startColumn: 9,
+        endLine: 1,
+        endColumn: 10,
+      },
+    });
+
+    expect(edits).toEqual([
+      {
+        range: {
+          start: { line: 1, column: 9 },
+          end: { line: 1, column: 10 },
+        },
+        text: "a + b;",
+        reason: "cursor-range-trusted",
+      },
+    ]);
+    expect(applyEdits(contents, edits)).toContain("return a + b;");
+    expect(applyEdits(contents, edits)).toContain("function keep()");
+  });
 });
